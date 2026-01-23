@@ -29,6 +29,7 @@ type STree struct {
 // Build creates a new S-Tree from the given slice of uint32 values.
 // The input slice does not need to be sorted; duplicates will be removed.
 // Returns ErrEmptyInput if the input is empty.
+// Returns ErrValueTooLarge if any value is >= 0x80000000 (not a valid uint31).
 //
 // WARNING: The input slice will be sorted in-place. If you need to preserve
 // the original order, make a copy before calling Build.
@@ -45,6 +46,12 @@ func Build(values []uint32) (*STree, error) {
 		return nil, ErrEmptyInput
 	}
 
+	// Validate all values are within uint31 range
+	// Since the slice is sorted, we only need to check the last (largest) value
+	if unique[len(unique)-1] > MaxValue {
+		return nil, ErrValueTooLarge
+	}
+
 	return buildFromUnique(unique)
 }
 
@@ -53,6 +60,7 @@ func Build(values []uint32) (*STree, error) {
 // During building, each unique item's SetIndex method is called with its position in the tree.
 // This is the most efficient way to build a tree when you need index correlation.
 // Returns ErrEmptyInput if the input is empty.
+// Returns ErrValueTooLarge if any key is >= 0x80000000 (not a valid uint31).
 //
 // WARNING: The input slice will be reordered in-place (sorted by key).
 // If you need to preserve the original order, make a copy before calling BuildFromKeyed.
@@ -104,6 +112,12 @@ func BuildFromKeyed[T Keyed](items []T) (*STree, error) {
 
 	if len(unique) == 0 {
 		return nil, ErrEmptyInput
+	}
+
+	// Validate all keys are within uint31 range
+	// Since the slice is sorted, we only need to check the last (largest) key
+	if unique[len(unique)-1] > MaxValue {
+		return nil, ErrValueTooLarge
 	}
 
 	// Build the tree, setting indices during construction

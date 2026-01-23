@@ -155,20 +155,10 @@ func BenchmarkSortedIteration(b *testing.B) {
 			b.Fatal(err)
 		}
 
-		b.Run(fmt.Sprintf("Sorted/n=%d", size), func(b *testing.B) {
+		b.Run(fmt.Sprintf("n=%d", size), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				count := 0
 				reader.Sorted()(func(v uint32, _ int) bool {
-					count++
-					return true
-				})
-			}
-		})
-
-		b.Run(fmt.Sprintf("All/n=%d", size), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				count := 0
-				reader.All()(func(v uint32) bool {
 					count++
 					return true
 				})
@@ -265,12 +255,8 @@ func BenchmarkContains(b *testing.B) {
 	})
 }
 
-// BenchmarkSIMDvsGeneric compares SIMD and pure-Go search implementations.
-func BenchmarkSIMDvsGeneric(b *testing.B) {
-	if !SIMDAvailable() {
-		b.Skip("SIMD not available")
-	}
-
+// BenchmarkSearchImplementations compares Generic, SSE, and AVX2 search implementations.
+func BenchmarkSearchImplementations(b *testing.B) {
 	sizes := []int{1000, 10000, 100000}
 
 	for _, size := range sizes {
@@ -293,17 +279,27 @@ func BenchmarkSIMDvsGeneric(b *testing.B) {
 		numBlocks := reader.NumBlocks()
 		searchKey := uint32(size)
 
-		b.Run(fmt.Sprintf("SIMD/n=%d", size), func(b *testing.B) {
+		b.Run(fmt.Sprintf("Generic/n=%d", size), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				search(blocks, searchKey, numBlocks)
+				SearchGeneric(blocks, searchKey, numBlocks)
 			}
 		})
 
-		b.Run(fmt.Sprintf("Generic/n=%d", size), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				searchGeneric(blocks, searchKey, numBlocks)
-			}
-		})
+		if HasSSE42() {
+			b.Run(fmt.Sprintf("SSE/n=%d", size), func(b *testing.B) {
+				for i := 0; i < b.N; i++ {
+					SearchSSE(blocks, searchKey, numBlocks)
+				}
+			})
+		}
+
+		if HasAVX2() {
+			b.Run(fmt.Sprintf("AVX2/n=%d", size), func(b *testing.B) {
+				for i := 0; i < b.N; i++ {
+					SearchAVX2(blocks, searchKey, numBlocks)
+				}
+			})
+		}
 	}
 }
 

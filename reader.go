@@ -58,9 +58,14 @@ func (r *Reader) Data() []byte {
 
 // Search searches for a key in the S-Tree using tree traversal.
 // Returns the position in the data array where the key is found, or -1 if not found.
+// Returns -1 immediately if key >= 0x80000000 (not a valid uint31).
 // This uses the optimized pure-Go implementation; SIMD-optimized versions are
 // available on supported architectures via SearchSIMD.
 func (r *Reader) Search(key uint32) int {
+	// Keys >= 0x80000000 cannot exist in a valid tree
+	if key > MaxValue {
+		return -1
+	}
 	return search(r.blocks, key, r.numBlocks)
 }
 

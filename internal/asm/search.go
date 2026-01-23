@@ -3,9 +3,12 @@
 package main
 
 import (
+	"fmt"
+
 	. "github.com/mmcloughlin/avo/build"
 	"github.com/mmcloughlin/avo/operand"
 	. "github.com/mmcloughlin/avo/operand"
+	"github.com/mmcloughlin/avo/reg"
 )
 
 const (
@@ -47,8 +50,8 @@ func genSearchAVX2() {
 	VPBROADCASTD(sentinelBroadcast.AsX(), sentinelBroadcast)
 
 	// Tree traversal state
-	k := GP64()       // Current block index
-	XORQ(k, k)        // k = 0 (start at root)
+	k := GP64() // Current block index
+	XORQ(k, k)  // k = 0 (start at root)
 
 	Label("traversalLoop")
 	// Check if k < numBlocks
@@ -89,9 +92,13 @@ func genSearchAVX2() {
 	MOVQ(U64(16), childIdx) // Default: rightmost child
 
 	// Count values greater than key in first half
+	// In Go asm (Plan 9): VPCMPGTD src2, src1, dest computes dest = (src1 > src2)
+	// In avo: VPCMPGTD(a, b, c) generates "VPCMPGTD a, b, c" → c = (b > a)
+	// We want: gtMask = (first8 > keyBroadcast) = (values > key)
+	// So we call: VPCMPGTD(keyBroadcast, first8, gtMask)
 	gtMask := YMM()
 	gtBits := GP32()
-	VPCMPGTD(keyBroadcast, first8, gtMask) // gtMask = (values > key)
+	VPCMPGTD(keyBroadcast, first8, gtMask) // gtMask = (first8 > keyBroadcast) = (values > key)
 	VMOVMSKPS(gtMask, gtBits)
 	TESTL(gtBits, gtBits)
 	JNZ(LabelRef("greaterInFirstHalf"))
@@ -105,7 +112,7 @@ func genSearchAVX2() {
 	JNZ(LabelRef("sentinelInFirstHalf"))
 
 	// Check second half for greater values
-	VPCMPGTD(keyBroadcast, second8, gtMask)
+	VPCMPGTD(keyBroadcast, second8, gtMask) // gtMask = (second8 > keyBroadcast) = (values > key)
 	VMOVMSKPS(gtMask, gtBits)
 	TESTL(gtBits, gtBits)
 	JNZ(LabelRef("greaterInSecondHalf"))
@@ -223,155 +230,75 @@ func genSearchSSE() {
 	SHLQ(Imm(6), blockAddr)
 	ADDQ(blocks.Base, blockAddr)
 
-	// Process 16 values in 4 chunks of 4
-	// Chunk 0: bytes 0-15 (values 0-3)
-	chunk0 := XMM()
-	MOVOU(Mem{Base: blockAddr}, chunk0)
+	// Load all 4 chunks and check for matches using a loop
+	chunks := make([]reg.VecVirtual, 4)
 	matchXMM := XMM()
-	MOVO(keyXMM, matchXMM)
-	PCMPEQL(chunk0, matchXMM)
 	matchBits := GP32()
-	PMOVMSKB(matchXMM, matchBits)
-	TESTL(matchBits, matchBits)
-	JNZ(LabelRef("sseFoundInChunk0"))
 
-	// Chunk 1: bytes 16-31 (values 4-7)
-	chunk1 := XMM()
-	MOVOU(Mem{Base: blockAddr, Disp: 16}, chunk1)
-	MOVO(keyXMM, matchXMM)
-	PCMPEQL(chunk1, matchXMM)
-	PMOVMSKB(matchXMM, matchBits)
-	TESTL(matchBits, matchBits)
-	JNZ(LabelRef("sseFoundInChunk1"))
-
-	// Chunk 2: bytes 32-47 (values 8-11)
-	chunk2 := XMM()
-	MOVOU(Mem{Base: blockAddr, Disp: 32}, chunk2)
-	MOVO(keyXMM, matchXMM)
-	PCMPEQL(chunk2, matchXMM)
-	PMOVMSKB(matchXMM, matchBits)
-	TESTL(matchBits, matchBits)
-	JNZ(LabelRef("sseFoundInChunk2"))
-
-	// Chunk 3: bytes 48-63 (values 12-15)
-	chunk3 := XMM()
-	MOVOU(Mem{Base: blockAddr, Disp: 48}, chunk3)
-	MOVO(keyXMM, matchXMM)
-	PCMPEQL(chunk3, matchXMM)
-	PMOVMSKB(matchXMM, matchBits)
-	TESTL(matchBits, matchBits)
-	JNZ(LabelRef("sseFoundInChunk3"))
+	for i := range 4 {
+		chunks[i] = XMM()
+		MOVOU(Mem{Base: blockAddr, Disp: i * 16}, chunks[i])
+		MOVO(keyXMM, matchXMM)
+		PCMPEQL(chunks[i], matchXMM)
+		PMOVMSKB(matchXMM, matchBits)
+		TESTL(matchBits, matchBits)
+		JNZ(LabelRef(fmt.Sprintf("sseFoundInChunk%d", i)))
+	}
 
 	// No match found, determine child index
 	childIdx := GP64()
 	MOVQ(U64(16), childIdx) // Default: rightmost
 
-	// Find first value > key in chunk 0
+	// Check for greater values and sentinels in each chunk
+	// PCMPGTL computes dest = (dest > src), so after MOVO(chunks[i], gtXMM),
+	// PCMPGTL(keyXMM, gtXMM) computes gtXMM = (gtXMM > keyXMM) = (values > key)
 	gtXMM := XMM()
-	MOVO(chunk0, gtXMM)
-	PCMPGTL(keyXMM, gtXMM)
 	gtBits := GP32()
-	PMOVMSKB(gtXMM, gtBits)
-	TESTL(gtBits, gtBits)
-	JNZ(LabelRef("sseGtChunk0"))
-
-	// Check sentinels in chunk 0
 	sentXMM := XMM()
-	MOVO(sentinelXMM, sentXMM)
-	PCMPEQL(chunk0, sentXMM)
 	sentBits := GP32()
-	PMOVMSKB(sentXMM, sentBits)
-	TESTL(sentBits, sentBits)
-	JNZ(LabelRef("sseSentChunk0"))
 
-	// Chunk 1
-	MOVO(chunk1, gtXMM)
-	PCMPGTL(keyXMM, gtXMM)
-	PMOVMSKB(gtXMM, gtBits)
-	TESTL(gtBits, gtBits)
-	JNZ(LabelRef("sseGtChunk1"))
+	for i := range 4 {
+		// Check for value > key: gtXMM = chunks[i], then gtXMM = (gtXMM > keyXMM)
+		MOVO(chunks[i], gtXMM)
+		PCMPGTL(keyXMM, gtXMM) // gtXMM = (chunks[i] > keyXMM) = (values > key)
+		PMOVMSKB(gtXMM, gtBits)
+		TESTL(gtBits, gtBits)
+		JNZ(LabelRef(fmt.Sprintf("sseGtChunk%d", i)))
 
-	MOVO(sentinelXMM, sentXMM)
-	PCMPEQL(chunk1, sentXMM)
-	PMOVMSKB(sentXMM, sentBits)
-	TESTL(sentBits, sentBits)
-	JNZ(LabelRef("sseSentChunk1"))
-
-	// Chunk 2
-	MOVO(chunk2, gtXMM)
-	PCMPGTL(keyXMM, gtXMM)
-	PMOVMSKB(gtXMM, gtBits)
-	TESTL(gtBits, gtBits)
-	JNZ(LabelRef("sseGtChunk2"))
-
-	MOVO(sentinelXMM, sentXMM)
-	PCMPEQL(chunk2, sentXMM)
-	PMOVMSKB(sentXMM, sentBits)
-	TESTL(sentBits, sentBits)
-	JNZ(LabelRef("sseSentChunk2"))
-
-	// Chunk 3
-	MOVO(chunk3, gtXMM)
-	PCMPGTL(keyXMM, gtXMM)
-	PMOVMSKB(gtXMM, gtBits)
-	TESTL(gtBits, gtBits)
-	JNZ(LabelRef("sseGtChunk3"))
-
-	MOVO(sentinelXMM, sentXMM)
-	PCMPEQL(chunk3, sentXMM)
-	PMOVMSKB(sentXMM, sentBits)
-	TESTL(sentBits, sentBits)
-	JNZ(LabelRef("sseSentChunk3"))
+		// Check for sentinel
+		MOVO(sentinelXMM, sentXMM)
+		PCMPEQL(chunks[i], sentXMM)
+		PMOVMSKB(sentXMM, sentBits)
+		TESTL(sentBits, sentBits)
+		JNZ(LabelRef(fmt.Sprintf("sseSentChunk%d", i)))
+	}
 
 	JMP(LabelRef("sseCalculateNext"))
 
-	// Greater than handlers - PMOVMSKB gives byte mask, need to convert to value index
-	// Each uint32 is 4 bytes, so we BSF and divide by 4
-	Label("sseGtChunk0")
-	BSFL(gtBits, childIdx.As32())
-	SHRQ(Imm(2), childIdx) // Divide by 4 to get value index
-	JMP(LabelRef("sseCalculateNext"))
+	// Generate handlers for each chunk
+	for i := range 4 {
+		offset := i * 4
 
-	Label("sseGtChunk1")
-	BSFL(gtBits, childIdx.As32())
-	SHRQ(Imm(2), childIdx)
-	ADDQ(Imm(4), childIdx)
-	JMP(LabelRef("sseCalculateNext"))
+		// Greater than handler
+		Label(fmt.Sprintf("sseGtChunk%d", i))
+		BSFL(gtBits, childIdx.As32())
+		SHRQ(Imm(2), childIdx) // Divide by 4 to get value index
+		if offset > 0 {
+			ADDQ(Imm(uint64(offset)), childIdx)
+		}
+		JMP(LabelRef("sseCalculateNext"))
 
-	Label("sseGtChunk2")
-	BSFL(gtBits, childIdx.As32())
-	SHRQ(Imm(2), childIdx)
-	ADDQ(Imm(8), childIdx)
-	JMP(LabelRef("sseCalculateNext"))
-
-	Label("sseGtChunk3")
-	BSFL(gtBits, childIdx.As32())
-	SHRQ(Imm(2), childIdx)
-	ADDQ(Imm(12), childIdx)
-	JMP(LabelRef("sseCalculateNext"))
-
-	// Sentinel handlers
-	Label("sseSentChunk0")
-	BSFL(sentBits, childIdx.As32())
-	SHRQ(Imm(2), childIdx)
-	JMP(LabelRef("sseCalculateNext"))
-
-	Label("sseSentChunk1")
-	BSFL(sentBits, childIdx.As32())
-	SHRQ(Imm(2), childIdx)
-	ADDQ(Imm(4), childIdx)
-	JMP(LabelRef("sseCalculateNext"))
-
-	Label("sseSentChunk2")
-	BSFL(sentBits, childIdx.As32())
-	SHRQ(Imm(2), childIdx)
-	ADDQ(Imm(8), childIdx)
-	JMP(LabelRef("sseCalculateNext"))
-
-	Label("sseSentChunk3")
-	BSFL(sentBits, childIdx.As32())
-	SHRQ(Imm(2), childIdx)
-	ADDQ(Imm(12), childIdx)
+		// Sentinel handler
+		Label(fmt.Sprintf("sseSentChunk%d", i))
+		BSFL(sentBits, childIdx.As32())
+		SHRQ(Imm(2), childIdx)
+		if offset > 0 {
+			ADDQ(Imm(uint64(offset)), childIdx)
+		}
+		if i < 3 {
+			JMP(LabelRef("sseCalculateNext"))
+		}
+	}
 
 	Label("sseCalculateNext")
 	// k = k * 17 + childIdx + 1
@@ -382,52 +309,27 @@ func genSearchSSE() {
 	MOVQ(temp, k)
 	JMP(LabelRef("sseTraversalLoop"))
 
-	// Found handlers - convert byte mask to value index
-	Label("sseFoundInChunk0")
+	// Generate found handlers for each chunk
 	lane := GP32()
-	BSFL(matchBits, lane)
-	SHRQ(Imm(2), lane.As64()) // Convert byte index to value index
 	result := GP64()
-	MOVQ(k, result)
-	SHLQ(Imm(4), result)
 	temp2 := GP64()
-	MOVL(lane, temp2.As32())
-	ADDQ(temp2, result)
-	Store(result, ReturnIndex(0))
-	RET()
 
-	Label("sseFoundInChunk1")
-	BSFL(matchBits, lane)
-	SHRQ(Imm(2), lane.As64())
-	MOVQ(k, result)
-	SHLQ(Imm(4), result)
-	MOVL(lane, temp2.As32())
-	ADDQ(temp2, result)
-	ADDQ(Imm(4), result)
-	Store(result, ReturnIndex(0))
-	RET()
+	for i := range 4 {
+		offset := i * 4
 
-	Label("sseFoundInChunk2")
-	BSFL(matchBits, lane)
-	SHRQ(Imm(2), lane.As64())
-	MOVQ(k, result)
-	SHLQ(Imm(4), result)
-	MOVL(lane, temp2.As32())
-	ADDQ(temp2, result)
-	ADDQ(Imm(8), result)
-	Store(result, ReturnIndex(0))
-	RET()
-
-	Label("sseFoundInChunk3")
-	BSFL(matchBits, lane)
-	SHRQ(Imm(2), lane.As64())
-	MOVQ(k, result)
-	SHLQ(Imm(4), result)
-	MOVL(lane, temp2.As32())
-	ADDQ(temp2, result)
-	ADDQ(Imm(12), result)
-	Store(result, ReturnIndex(0))
-	RET()
+		Label(fmt.Sprintf("sseFoundInChunk%d", i))
+		BSFL(matchBits, lane)
+		SHRQ(Imm(2), lane.As64()) // Convert byte index to value index
+		MOVQ(k, result)
+		SHLQ(Imm(4), result)
+		MOVL(lane, temp2.As32())
+		ADDQ(temp2, result)
+		if offset > 0 {
+			ADDQ(Imm(uint64(offset)), result)
+		}
+		Store(result, ReturnIndex(0))
+		RET()
+	}
 
 	Label("sseNotFound")
 	result = GP64()
@@ -435,4 +337,3 @@ func genSearchSSE() {
 	Store(result, ReturnIndex(0))
 	RET()
 }
-

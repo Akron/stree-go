@@ -123,69 +123,69 @@ sseTraversalLoop:
 	MOVQ     CX, SI
 	SHLQ     $0x06, SI
 	ADDQ     AX, SI
-	MOVOU    (SI), X2
-	MOVO     X0, X3
-	PCMPEQL  X2, X3
-	PMOVMSKB X3, DI
+	MOVOU    (SI), X3
+	MOVO     X0, X2
+	PCMPEQL  X3, X2
+	PMOVMSKB X2, DI
 	TESTL    DI, DI
 	JNZ      sseFoundInChunk0
 	MOVOU    16(SI), X4
-	MOVO     X0, X3
-	PCMPEQL  X4, X3
-	PMOVMSKB X3, DI
+	MOVO     X0, X2
+	PCMPEQL  X4, X2
+	PMOVMSKB X2, DI
 	TESTL    DI, DI
 	JNZ      sseFoundInChunk1
 	MOVOU    32(SI), X5
-	MOVO     X0, X3
-	PCMPEQL  X5, X3
-	PMOVMSKB X3, DI
+	MOVO     X0, X2
+	PCMPEQL  X5, X2
+	PMOVMSKB X2, DI
 	TESTL    DI, DI
 	JNZ      sseFoundInChunk2
 	MOVOU    48(SI), X6
-	MOVO     X0, X3
-	PCMPEQL  X6, X3
-	PMOVMSKB X3, DI
+	MOVO     X0, X2
+	PCMPEQL  X6, X2
+	PMOVMSKB X2, DI
 	TESTL    DI, DI
 	JNZ      sseFoundInChunk3
 	MOVQ     $0x0000000000000010, SI
-	MOVO     X2, X3
-	PCMPGTL  X0, X3
-	PMOVMSKB X3, DI
+	MOVO     X3, X2
+	PCMPGTL  X0, X2
+	PMOVMSKB X2, DI
 	TESTL    DI, DI
 	JNZ      sseGtChunk0
-	MOVO     X1, X3
-	PCMPEQL  X2, X3
-	PMOVMSKB X3, DI
+	MOVO     X1, X2
+	PCMPEQL  X3, X2
+	PMOVMSKB X2, DI
 	TESTL    DI, DI
 	JNZ      sseSentChunk0
-	MOVO     X4, X3
-	PCMPGTL  X0, X3
-	PMOVMSKB X3, DI
+	MOVO     X4, X2
+	PCMPGTL  X0, X2
+	PMOVMSKB X2, DI
 	TESTL    DI, DI
 	JNZ      sseGtChunk1
-	MOVO     X1, X3
-	PCMPEQL  X4, X3
-	PMOVMSKB X3, DI
+	MOVO     X1, X2
+	PCMPEQL  X4, X2
+	PMOVMSKB X2, DI
 	TESTL    DI, DI
 	JNZ      sseSentChunk1
-	MOVO     X5, X3
-	PCMPGTL  X0, X3
-	PMOVMSKB X3, DI
+	MOVO     X5, X2
+	PCMPGTL  X0, X2
+	PMOVMSKB X2, DI
 	TESTL    DI, DI
 	JNZ      sseGtChunk2
-	MOVO     X1, X3
-	PCMPEQL  X5, X3
-	PMOVMSKB X3, DI
+	MOVO     X1, X2
+	PCMPEQL  X5, X2
+	PMOVMSKB X2, DI
 	TESTL    DI, DI
 	JNZ      sseSentChunk2
-	MOVO     X6, X3
-	PCMPGTL  X0, X3
-	PMOVMSKB X3, DI
+	MOVO     X6, X2
+	PCMPGTL  X0, X2
+	PMOVMSKB X2, DI
 	TESTL    DI, DI
 	JNZ      sseGtChunk3
-	MOVO     X1, X3
-	PCMPEQL  X6, X3
-	PMOVMSKB X3, DI
+	MOVO     X1, X2
+	PCMPEQL  X6, X2
+	PMOVMSKB X2, DI
 	TESTL    DI, DI
 	JNZ      sseSentChunk3
 	JMP      sseCalculateNext
@@ -195,7 +195,18 @@ sseGtChunk0:
 	SHRQ $0x02, SI
 	JMP  sseCalculateNext
 
+sseSentChunk0:
+	BSFL DI, SI
+	SHRQ $0x02, SI
+	JMP  sseCalculateNext
+
 sseGtChunk1:
+	BSFL DI, SI
+	SHRQ $0x02, SI
+	ADDQ $0x04, SI
+	JMP  sseCalculateNext
+
+sseSentChunk1:
 	BSFL DI, SI
 	SHRQ $0x02, SI
 	ADDQ $0x04, SI
@@ -207,27 +218,16 @@ sseGtChunk2:
 	ADDQ $0x08, SI
 	JMP  sseCalculateNext
 
-sseGtChunk3:
-	BSFL DI, SI
-	SHRQ $0x02, SI
-	ADDQ $0x0c, SI
-	JMP  sseCalculateNext
-
-sseSentChunk0:
-	BSFL DI, SI
-	SHRQ $0x02, SI
-	JMP  sseCalculateNext
-
-sseSentChunk1:
-	BSFL DI, SI
-	SHRQ $0x02, SI
-	ADDQ $0x04, SI
-	JMP  sseCalculateNext
-
 sseSentChunk2:
 	BSFL DI, SI
 	SHRQ $0x02, SI
 	ADDQ $0x08, SI
+	JMP  sseCalculateNext
+
+sseGtChunk3:
+	BSFL DI, SI
+	SHRQ $0x02, SI
+	ADDQ $0x0c, SI
 	JMP  sseCalculateNext
 
 sseSentChunk3:

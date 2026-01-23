@@ -33,6 +33,11 @@ const (
 	// Sentinel is the value used to mark empty slots in a block.
 	// Using max uint32 ensures it sorts last and is easily detectable.
 	Sentinel = ^uint32(0) // 0xFFFFFFFF
+
+	// MaxValue is the maximum allowed value for keys (2^31 - 1).
+	// Values must be < 0x80000000 because SIMD comparison uses signed arithmetic.
+	// This ensures consistent behavior between pure Go and SIMD implementations.
+	MaxValue = uint32(0x7FFFFFFF)
 )
 
 // Errors returned by S-Tree operations.
@@ -43,6 +48,7 @@ var (
 	ErrInvalidData     = errors.New("stree: invalid data")
 	ErrDataTooShort    = errors.New("stree: data too short")
 	ErrInvalidBlockSz  = errors.New("stree: invalid block size")
+	ErrValueTooLarge   = errors.New("stree: value exceeds maximum (must be < 0x80000000)")
 )
 
 // Header represents the S-Tree file header.

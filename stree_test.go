@@ -524,17 +524,37 @@ func TestSearchEdgeCases(t *testing.T) {
 		assert.True(t, reader.Contains(0))
 	})
 
-	t.Run("search for max uint32 minus 1", func(t *testing.T) {
-		// Sentinel is ^uint32(0), so max-1 should be valid
-		maxVal := ^uint32(0) - 1
-		st, err := Build([]uint32{1, maxVal})
+	t.Run("search for max valid value (MaxValue)", func(t *testing.T) {
+		// MaxValue is the largest valid value (0x7FFFFFFF)
+		st, err := Build([]uint32{1, MaxValue})
 		require.NoError(t, err)
 
 		reader, err := NewReader(st.Data())
 		require.NoError(t, err)
 
-		assert.True(t, reader.Contains(maxVal))
+		assert.True(t, reader.Contains(MaxValue))
 		assert.True(t, reader.Contains(1))
+	})
+
+	t.Run("search for value exceeding MaxValue returns not found", func(t *testing.T) {
+		st, err := Build([]uint32{1, 100})
+		require.NoError(t, err)
+
+		reader, err := NewReader(st.Data())
+		require.NoError(t, err)
+
+		// Values >= 0x80000000 should return -1 immediately
+		assert.Equal(t, -1, reader.Search(0x80000000))
+		assert.Equal(t, -1, reader.Search(^uint32(0)))
+		assert.False(t, reader.Contains(0x80000000))
+	})
+
+	t.Run("build with value exceeding MaxValue fails", func(t *testing.T) {
+		_, err := Build([]uint32{1, 0x80000000})
+		assert.ErrorIs(t, err, ErrValueTooLarge)
+
+		_, err = Build([]uint32{^uint32(0) - 1})
+		assert.ErrorIs(t, err, ErrValueTooLarge)
 	})
 
 	t.Run("search in sparse data", func(t *testing.T) {

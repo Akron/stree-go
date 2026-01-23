@@ -1,4 +1,5 @@
-//go:build ignore
+//go:build avogen
+// +build avogen
 
 package main
 

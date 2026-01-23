@@ -1,7 +1,5 @@
 //go:build amd64 && !noasm
 
-//go:generate go run ./internal/asm/search.go
-
 package stree
 
 import "golang.org/x/sys/cpu"

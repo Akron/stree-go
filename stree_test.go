@@ -43,24 +43,24 @@ func TestBuildBasic(t *testing.T) {
 	})
 
 	t.Run("exact block size", func(t *testing.T) {
-		input := make([]uint32, BlockSize)
+		input := make([]uint32, blockSize)
 		for i := range input {
 			input[i] = uint32(i + 1)
 		}
 		st, err := Build(input)
 		require.NoError(t, err)
-		assert.Equal(t, BlockSize, st.Count())
+		assert.Equal(t, blockSize, st.Count())
 		assert.Equal(t, 1, st.NumBlocks())
 	})
 
 	t.Run("multiple blocks", func(t *testing.T) {
-		input := make([]uint32, BlockSize+5)
+		input := make([]uint32, blockSize+5)
 		for i := range input {
 			input[i] = uint32(i + 1)
 		}
 		st, err := Build(input)
 		require.NoError(t, err)
-		assert.Equal(t, BlockSize+5, st.Count())
+		assert.Equal(t, blockSize+5, st.Count())
 		assert.Equal(t, 2, st.NumBlocks())
 	})
 }
@@ -203,8 +203,8 @@ func TestSearchBasic(t *testing.T) {
 			pos := reader.Search(key)
 			require.GreaterOrEqual(t, pos, 0)
 			// Verify the position contains the correct value
-			blockIdx := pos / BlockSize
-			posInBlock := pos % BlockSize
+			blockIdx := pos / blockSize
+			posInBlock := pos % blockSize
 			val := reader.blockValue(blockIdx, posInBlock)
 			assert.Equal(t, key, val)
 		}
@@ -307,23 +307,23 @@ func TestHeader(t *testing.T) {
 		st, err := Build([]uint32{1, 2, 3})
 		require.NoError(t, err)
 
-		header, err := ParseHeader(st.Data())
+		header, err := parseHeader(st.Data())
 		require.NoError(t, err)
 
-		assert.Equal(t, "STRE", string(header.Magic[:]))
-		assert.Equal(t, Version, header.Version)
-		assert.Equal(t, uint16(BlockSize), header.BlockSize)
-		assert.Equal(t, uint32(3), header.Count)
+		assert.Equal(t, "STRE", string(header.magic[:]))
+		assert.Equal(t, Version, header.version)
+		assert.Equal(t, uint16(blockSize), header.blockSize)
+		assert.Equal(t, uint32(3), header.count)
 	})
 
 	t.Run("invalid magic", func(t *testing.T) {
 		data := []byte("XXXX\x01\x00\x10\x00\x03\x00\x00\x00\x00\x00\x00\x00")
-		_, err := ParseHeader(data)
+		_, err := parseHeader(data)
 		assert.ErrorIs(t, err, ErrInvalidMagic)
 	})
 
 	t.Run("data too short", func(t *testing.T) {
-		_, err := ParseHeader([]byte("STRE"))
+		_, err := parseHeader([]byte("STRE"))
 		assert.ErrorIs(t, err, ErrDataTooShort)
 	})
 }
@@ -346,7 +346,7 @@ func TestNewReader(t *testing.T) {
 		require.NoError(t, err)
 
 		// Truncate the data
-		truncated := st.Data()[:HeaderSize+10]
+		truncated := st.Data()[:headerSize+10]
 		_, err = NewReader(truncated)
 		assert.ErrorIs(t, err, ErrDataTooShort)
 	})
@@ -505,8 +505,8 @@ func TestSortedWithIndex(t *testing.T) {
 	// Verify each index maps back to the correct value
 	for _, p := range pairs {
 		// Read the value at the stored index
-		blockIdx := p.index / BlockSize
-		posInBlock := p.index % BlockSize
+		blockIdx := p.index / blockSize
+		posInBlock := p.index % blockSize
 		val := reader.blockValue(blockIdx, posInBlock)
 		assert.Equal(t, p.value, val)
 	}
@@ -607,8 +607,8 @@ func TestSearchConsistency(t *testing.T) {
 			require.GreaterOrEqual(t, pos, 0, "should find %d", key)
 
 			// Verify position contains correct value
-			blockIdx := pos / BlockSize
-			posInBlock := pos % BlockSize
+			blockIdx := pos / blockSize
+			posInBlock := pos % blockSize
 			val := reader.blockValue(blockIdx, posInBlock)
 			assert.Equal(t, key, val, "position %d should contain %d", pos, key)
 		}
@@ -623,15 +623,15 @@ func TestNumBlocks(t *testing.T) {
 	}{
 		{0, 0},
 		{1, 1},
-		{BlockSize, 1},
-		{BlockSize + 1, 2},
-		{BlockSize * 2, 2},
-		{BlockSize*2 + 1, 3},
+		{blockSize, 1},
+		{blockSize + 1, 2},
+		{blockSize * 2, 2},
+		{blockSize*2 + 1, 3},
 		{100, 7}, // ceil(100/16) = 7
 	}
 
 	for _, tt := range tests {
-		assert.Equal(t, tt.expected, NumBlocks(tt.count),
+		assert.Equal(t, tt.expected, numBlocks(tt.count),
 			"NumBlocks(%d) should be %d", tt.count, tt.expected)
 	}
 }
@@ -642,10 +642,10 @@ func TestDataSize(t *testing.T) {
 		count    int
 		expected int
 	}{
-		{0, HeaderSize},
-		{1, HeaderSize + BlockSizeBytes},
-		{BlockSize, HeaderSize + BlockSizeBytes},
-		{BlockSize + 1, HeaderSize + 2*BlockSizeBytes},
+		{0, headerSize},
+		{1, headerSize + blockSizeBytes},
+		{blockSize, headerSize + blockSizeBytes},
+		{blockSize + 1, headerSize + 2*blockSizeBytes},
 	}
 
 	for _, tt := range tests {
@@ -671,7 +671,7 @@ func TestSIMDConsistency(t *testing.T) {
 			reader, err := NewReader(st.Data())
 			require.NoError(t, err)
 
-			blocks := reader.Data()[HeaderSize:]
+			blocks := reader.Data()[headerSize:]
 			numBlocks := reader.NumBlocks()
 
 			// Test keys that exist
@@ -693,4 +693,89 @@ func TestSIMDConsistency(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCRC32 tests CRC-32 checksum functionality.
+func TestCRC32(t *testing.T) {
+	t.Run("valid CRC32 on build", func(t *testing.T) {
+		values := []uint32{10, 20, 30, 40, 50}
+		st, err := Build(values)
+		require.NoError(t, err)
+
+		reader, err := NewReader(st.Data())
+		require.NoError(t, err)
+
+		assert.True(t, reader.ValidateCRC32(), "CRC32 should be valid after build")
+	})
+
+	t.Run("NewReaderWithValidation success", func(t *testing.T) {
+		values := []uint32{1, 2, 3, 4, 5}
+		st, err := Build(values)
+		require.NoError(t, err)
+
+		reader, err := NewReaderWithValidation(st.Data())
+		require.NoError(t, err)
+		assert.NotNil(t, reader)
+		assert.True(t, reader.ValidateCRC32())
+	})
+
+	t.Run("corrupted data detection", func(t *testing.T) {
+		values := []uint32{100, 200, 300}
+		st, err := Build(values)
+		require.NoError(t, err)
+
+		// Corrupt the data by modifying a value in the first block
+		data := make([]byte, len(st.Data()))
+		copy(data, st.Data())
+		// Modify the first value (after header)
+		data[headerSize+4] = 0xFF // This should corrupt the CRC
+
+		reader, err := NewReader(data)
+		require.NoError(t, err) // Reader creation should still work
+
+		assert.False(t, reader.ValidateCRC32(), "CRC32 should detect corruption")
+
+		// NewReaderWithValidation should fail
+		_, err = NewReaderWithValidation(data)
+		assert.ErrorIs(t, err, ErrInvalidData)
+	})
+
+	t.Run("header corruption detection", func(t *testing.T) {
+		values := []uint32{5, 10, 15}
+		st, err := Build(values)
+		require.NoError(t, err)
+
+		// Corrupt the CRC32 field itself - this should make validation fail
+		// (since CRC includes the CRC field set to 0 during computation)
+		data := make([]byte, len(st.Data()))
+		copy(data, st.Data())
+		// Modify CRC32 field (bytes 12-16) - flip a bit
+		data[12] ^= 0x01
+
+		reader, err := NewReader(data)
+		require.NoError(t, err)
+
+		assert.False(t, reader.ValidateCRC32(), "CRC32 should detect corruption when CRC field is modified")
+	})
+
+	t.Run("BuildFromKeyed CRC32", func(t *testing.T) {
+		items := []*TestEntry{
+			{key: 100, data: "first"},
+			{key: 50, data: "second"},
+			{key: 150, data: "third"},
+		}
+
+		st, err := BuildFromKeyed(items)
+		require.NoError(t, err)
+
+		reader, err := NewReader(st.Data())
+		require.NoError(t, err)
+
+		assert.True(t, reader.ValidateCRC32(), "BuildFromKeyed should generate valid CRC32")
+
+		// Verify indices were set correctly
+		for _, item := range items {
+			assert.True(t, reader.Contains(item.key))
+		}
+	})
 }

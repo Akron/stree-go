@@ -128,25 +128,29 @@ func BuildFromKeyed[T Keyed](items []T) (*STree, error) {
 func buildFromUnique(unique []uint32) (*STree, error) {
 	// Calculate required space
 	count := len(unique)
-	numBlocks := NumBlocks(count)
-	totalSize := HeaderSize + numBlocks*BlockSizeBytes
+	numBlocks := numBlocks(count)
+	totalSize := headerSize + numBlocks*blockSizeBytes
 
 	// Allocate buffer
 	data := make([]byte, totalSize)
 
-	// Write header
-	header := &Header{
-		Version:   Version,
-		BlockSize: BlockSize,
-		Count:     uint32(count),
-		Reserved:  0,
+	// Write header initially (CRC32 will be computed after data)
+	header := &header{
+		version:   Version,
+		blockSize: blockSize,
+		count:     uint32(count),
+		crc32:     0, // Will be set after data construction
 	}
-	copy(header.Magic[:], Magic)
-	copy(data[0:HeaderSize], header.Bytes())
+	copy(header.magic[:], Magic)
+	copy(data[0:headerSize], header.bytes())
 
 	// Build tree data using Eytzinger layout
-	blocks := data[HeaderSize:]
+	blocks := data[headerSize:]
 	buildEytzinger(unique, blocks, numBlocks)
+
+	// Compute and store CRC-32
+	header.crc32 = computeCRC32(data)
+	copy(data[0:headerSize], header.bytes())
 
 	return &STree{
 		data:  data,
@@ -158,7 +162,7 @@ func buildFromUnique(unique []uint32) (*STree, error) {
 func buildEytzinger(unique []uint32, blocks []byte, numBlocks int) {
 	// Initialize all blocks with sentinel values
 	for i := 0; i < len(blocks); i += 4 {
-		binary.LittleEndian.PutUint32(blocks[i:], Sentinel)
+		binary.LittleEndian.PutUint32(blocks[i:], sentinel)
 	}
 
 	t := 0 // Current position in input array
@@ -166,15 +170,15 @@ func buildEytzinger(unique []uint32, blocks []byte, numBlocks int) {
 	var build func(k int)
 	build = func(k int) {
 		if k < numBlocks {
-			for i := range BlockSize {
+			for i := range blockSize {
 				build(childIndex(k, i))
 				if t < len(unique) {
-					offset := k*BlockSizeBytes + i*4
+					offset := k*blockSizeBytes + i*4
 					binary.LittleEndian.PutUint32(blocks[offset:], unique[t])
 					t++
 				}
 			}
-			build(childIndex(k, BlockSize))
+			build(childIndex(k, blockSize))
 		}
 	}
 
@@ -186,25 +190,29 @@ func buildEytzinger(unique []uint32, blocks []byte, numBlocks int) {
 func buildFromUniqueKeyed[T Keyed](unique []uint32, items []T) (*STree, error) {
 	// Calculate required space
 	count := len(unique)
-	numBlocks := NumBlocks(count)
-	totalSize := HeaderSize + numBlocks*BlockSizeBytes
+	numBlocks := numBlocks(count)
+	totalSize := headerSize + numBlocks*blockSizeBytes
 
 	// Allocate buffer
 	data := make([]byte, totalSize)
 
-	// Write header
-	header := &Header{
-		Version:   Version,
-		BlockSize: BlockSize,
-		Count:     uint32(count),
-		Reserved:  0,
+	// Write header initially (CRC32 will be computed after data)
+	header := &header{
+		version:   Version,
+		blockSize: blockSize,
+		count:     uint32(count),
+		crc32:     0, // Will be set after data construction
 	}
-	copy(header.Magic[:], Magic)
-	copy(data[0:HeaderSize], header.Bytes())
+	copy(header.magic[:], Magic)
+	copy(data[0:headerSize], header.bytes())
 
 	// Build tree data using Eytzinger layout
-	blocks := data[HeaderSize:]
+	blocks := data[headerSize:]
 	buildEytzingerWithIndex(unique, items, blocks, numBlocks)
+
+	// Compute and store CRC-32
+	header.crc32 = computeCRC32(data)
+	copy(data[0:headerSize], header.bytes())
 
 	return &STree{
 		data:  data,
@@ -229,7 +237,7 @@ func buildFromUniqueKeyed[T Keyed](unique []uint32, items []T) (*STree, error) {
 func buildEytzingerWithIndex[T Keyed](unique []uint32, items []T, blocks []byte, numBlocks int) {
 	// Initialize all blocks with sentinel values
 	for i := 0; i < len(blocks); i += 4 {
-		binary.LittleEndian.PutUint32(blocks[i:], Sentinel)
+		binary.LittleEndian.PutUint32(blocks[i:], sentinel)
 	}
 
 	t := 0 // Current position in input array
@@ -238,26 +246,26 @@ func buildEytzingerWithIndex[T Keyed](unique []uint32, items []T, blocks []byte,
 	build = func(k int) {
 		if k < numBlocks {
 			// For each position in the block
-			for i := range BlockSize {
+			for i := range blockSize {
 				// Recursively build left child
 				build(childIndex(k, i))
 
 				// Place current element or sentinel
 				if t < len(unique) {
-					offset := k*BlockSizeBytes + i*4
+					offset := k*blockSizeBytes + i*4
 					binary.LittleEndian.PutUint32(blocks[offset:], unique[t])
 
 					// Set index on the item if provided - this is the key optimization!
 					// The position in the tree is: block * BlockSize + position in block
 					if items != nil {
-						items[t].SetIndex(uint32(k*BlockSize + i))
+						items[t].SetIndex(uint32(k*blockSize + i))
 					}
 
 					t++
 				}
 			}
 			// Recursively build rightmost child
-			build(childIndex(k, BlockSize))
+			build(childIndex(k, blockSize))
 		}
 	}
 
@@ -272,7 +280,7 @@ func (st *STree) Count() int {
 
 // NumBlocks returns the number of blocks in the S-Tree.
 func (st *STree) NumBlocks() int {
-	return NumBlocks(st.count)
+	return numBlocks(st.count)
 }
 
 // Data returns the underlying byte slice containing the serialized S-Tree.

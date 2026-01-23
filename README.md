@@ -101,6 +101,25 @@ func main() {
 }
 ```
 
+### Data Integrity (CRC-32)
+
+STree automatically computes and stores a CRC-32 checksum for data integrity validation. The checksum covers the entire file contents and is computed during tree construction.
+
+```go
+// Reader creation with automatic integrity validation
+reader, err := stree.NewReaderWithValidation(data)
+
+// Standard reader creation (no validation)
+reader, err := stree.NewReader(data)
+
+// Manual integrity check
+if reader.ValidateCRC32() {
+    fmt.Println("Data integrity verified")
+} else {
+    fmt.Println("Data corruption detected")
+}
+```
+
 ### Serialization and Memory Mapping
 
 ```go

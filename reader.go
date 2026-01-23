@@ -20,14 +20,14 @@ type Reader struct {
 //   - Memory-mapped files (using syscall.Mmap or mmap libraries)
 //   - Data read from disk
 func NewReader(data []byte) (*Reader, error) {
-	header, err := ParseHeader(data)
+	header, err := parseHeader(data)
 	if err != nil {
 		return nil, err
 	}
 
-	count := int(header.Count)
-	numBlocks := NumBlocks(count)
-	expectedSize := HeaderSize + numBlocks*BlockSizeBytes
+	count := int(header.count)
+	numBlocks := numBlocks(count)
+	expectedSize := headerSize + numBlocks*blockSizeBytes
 
 	if len(data) < expectedSize {
 		return nil, ErrDataTooShort
@@ -35,10 +35,26 @@ func NewReader(data []byte) (*Reader, error) {
 
 	return &Reader{
 		data:      data,
-		blocks:    data[HeaderSize:],
+		blocks:    data[headerSize:],
 		count:     count,
 		numBlocks: numBlocks,
 	}, nil
+}
+
+// NewReaderWithValidation creates a Reader from a byte slice and validates data integrity.
+// This performs CRC-32 validation during construction, which adds O(n) time cost.
+// Use NewReader for faster loading when integrity is already established.
+func NewReaderWithValidation(data []byte) (*Reader, error) {
+	reader, err := NewReader(data)
+	if err != nil {
+		return nil, err
+	}
+
+	if !reader.ValidateCRC32() {
+		return nil, ErrInvalidData
+	}
+
+	return reader, nil
 }
 
 // Count returns the number of elements in the S-Tree.
@@ -76,7 +92,7 @@ func (r *Reader) Contains(key uint32) bool {
 
 // blockValue reads a uint32 value from block k at position i.
 func (r *Reader) blockValue(k, i int) uint32 {
-	offset := k*BlockSizeBytes + i*4
+	offset := k*blockSizeBytes + i*4
 	return binary.LittleEndian.Uint32(r.blocks[offset:])
 }
 
@@ -86,9 +102,9 @@ func (r *Reader) blockValue(k, i int) uint32 {
 func (r *Reader) All() func(yield func(uint32) bool) {
 	return func(yield func(uint32) bool) {
 		for blockIdx := range r.numBlocks {
-			for i := range BlockSize {
+			for i := range blockSize {
 				val := r.blockValue(blockIdx, i)
-				if val == Sentinel {
+				if val == sentinel {
 					continue
 				}
 				if !yield(val) {
@@ -119,7 +135,7 @@ func (r *Reader) inOrderTraversal(k, i int, yield func(value uint32, index int) 
 		return true
 	}
 
-	for ; i < BlockSize; i++ {
+	for ; i < blockSize; i++ {
 		// Traverse left child
 		childK := childIndex(k, i)
 		if childK < r.numBlocks {
@@ -130,17 +146,17 @@ func (r *Reader) inOrderTraversal(k, i int, yield func(value uint32, index int) 
 
 		// Yield current value with its index
 		val := r.blockValue(k, i)
-		if val == Sentinel {
+		if val == sentinel {
 			return true
 		}
-		idx := k*BlockSize + i
+		idx := k*blockSize + i
 		if !yield(val, idx) {
 			return false
 		}
 	}
 
 	// Traverse rightmost child
-	childK := childIndex(k, BlockSize)
+	childK := childIndex(k, blockSize)
 	if childK < r.numBlocks {
 		if !r.inOrderTraversal(childK, 0, yield) {
 			return false
@@ -148,4 +164,11 @@ func (r *Reader) inOrderTraversal(k, i int, yield func(value uint32, index int) 
 	}
 
 	return true
+}
+
+// ValidateCRC32 checks the data integrity by validating the stored CRC-32 checksum.
+// Returns true if the checksum is valid, false if data is corrupted.
+// This operation is O(n) where n is the total data size.
+func (r *Reader) ValidateCRC32() bool {
+	return validateCRC32(r.data)
 }

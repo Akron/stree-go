@@ -3,7 +3,6 @@ meta:
   title: S-Tree Static B-Tree Index
   file-extension: stree
   endian: le
-  license: MIT
   
 doc: |
   S-Tree is a static B-tree data structure optimized for cache efficiency
@@ -44,9 +43,9 @@ types:
       - id: count
         type: u4
         doc: Total number of unique elements stored
-      - id: reserved
+      - id: crc32
         type: u4
-        doc: Reserved for future use (padding to 16 bytes)
+        doc: CRC-32 checksum of header + data blocks for integrity validation
 
   block:
     doc: |

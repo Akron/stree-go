@@ -10,19 +10,20 @@ package stree
 import (
 	"encoding/binary"
 	"errors"
+	"hash/crc32"
 )
 
 const (
-	// BlockSize is the number of uint32 elements per block.
+	// blockSize is the number of uint32 elements per block.
 	// 16 elements = 64 bytes = typical CPU cache line size.
 	// This enables efficient SIMD operations (SSE: 4 elements, AVX2: 8 elements).
-	BlockSize = 16
+	blockSize = 16
 
-	// BlockSizeBytes is the size of each block in bytes.
-	BlockSizeBytes = BlockSize * 4 // 64 bytes
+	// blockSizeBytes is the size of each block in bytes.
+	blockSizeBytes = blockSize * 4 // 64 bytes
 
-	// HeaderSize is the size of the file header in bytes.
-	HeaderSize = 16
+	// headerSize is the size of the file header in bytes.
+	headerSize = 16
 
 	// Magic bytes identifying an S-Tree file.
 	Magic = "STRE"
@@ -30,9 +31,9 @@ const (
 	// Version is the current format version.
 	Version uint16 = 0x0001
 
-	// Sentinel is the value used to mark empty slots in a block.
+	// sentinel is the value used to mark empty slots in a block.
 	// Using max uint32 ensures it sorts last and is easily detectable.
-	Sentinel = ^uint32(0) // 0xFFFFFFFF
+	sentinel = ^uint32(0) // 0xFFFFFFFF
 
 	// MaxValue is the maximum allowed value for keys (2^31 - 1).
 	// Values must be < 0x80000000 because SIMD comparison uses signed arithmetic.
@@ -42,87 +43,118 @@ const (
 
 // Errors returned by S-Tree operations.
 var (
-	ErrEmptyInput      = errors.New("stree: empty input")
-	ErrInvalidMagic    = errors.New("stree: invalid magic bytes")
-	ErrInvalidVersion  = errors.New("stree: unsupported version")
-	ErrInvalidData     = errors.New("stree: invalid data")
-	ErrDataTooShort    = errors.New("stree: data too short")
-	ErrInvalidBlockSz  = errors.New("stree: invalid block size")
-	ErrValueTooLarge   = errors.New("stree: value exceeds maximum (must be < 0x80000000)")
+	ErrEmptyInput     = errors.New("stree: empty input")
+	ErrInvalidMagic   = errors.New("stree: invalid magic bytes")
+	ErrInvalidVersion = errors.New("stree: unsupported version")
+	ErrInvalidData    = errors.New("stree: invalid data")
+	ErrDataTooShort   = errors.New("stree: data too short")
+	ErrInvalidBlockSz = errors.New("stree: invalid block size")
+	ErrValueTooLarge  = errors.New("stree: value exceeds maximum (must be < 0x80000000)")
 )
 
-// Header represents the S-Tree file header.
-type Header struct {
-	Magic     [4]byte // "STRE"
-	Version   uint16  // Format version
-	BlockSize uint16  // Elements per block (default 16)
-	Count     uint32  // Number of unique elements
-	Reserved  uint32  // Reserved for future use
+// header represents the S-Tree file header.
+type header struct {
+	magic     [4]byte // "STRE"
+	version   uint16  // Format version
+	blockSize uint16  // Elements per block (default 16)
+	count     uint32  // Number of unique elements
+	crc32     uint32  // CRC-32 checksum of header + data blocks
 }
 
-// ParseHeader parses an S-Tree header from a byte slice.
+// parseHeader parses an S-Tree header from a byte slice.
 // The slice must be at least HeaderSize (16) bytes.
-func ParseHeader(data []byte) (*Header, error) {
-	if len(data) < HeaderSize {
+func parseHeader(data []byte) (*header, error) {
+	if len(data) < headerSize {
 		return nil, ErrDataTooShort
 	}
 
-	h := &Header{
-		Version:   binary.LittleEndian.Uint16(data[4:6]),
-		BlockSize: binary.LittleEndian.Uint16(data[6:8]),
-		Count:     binary.LittleEndian.Uint32(data[8:12]),
-		Reserved:  binary.LittleEndian.Uint32(data[12:16]),
+	h := &header{
+		version:   binary.LittleEndian.Uint16(data[4:6]),
+		blockSize: binary.LittleEndian.Uint16(data[6:8]),
+		count:     binary.LittleEndian.Uint32(data[8:12]),
+		crc32:     binary.LittleEndian.Uint32(data[12:16]),
 	}
-	copy(h.Magic[:], data[0:4])
+	copy(h.magic[:], data[0:4])
 
 	// Validate magic
-	if string(h.Magic[:]) != Magic {
+	if string(h.magic[:]) != Magic {
 		return nil, ErrInvalidMagic
 	}
 
 	// Validate version
-	if h.Version != Version {
+	if h.version != Version {
 		return nil, ErrInvalidVersion
 	}
 
 	// Validate block size
-	if h.BlockSize == 0 || h.BlockSize != BlockSize {
+	if h.blockSize == 0 || h.blockSize != blockSize {
 		return nil, ErrInvalidBlockSz
 	}
 
 	return h, nil
 }
 
-// Bytes serializes the header to a byte slice.
-func (h *Header) Bytes() []byte {
-	buf := make([]byte, HeaderSize)
-	copy(buf[0:4], h.Magic[:])
-	binary.LittleEndian.PutUint16(buf[4:6], h.Version)
-	binary.LittleEndian.PutUint16(buf[6:8], h.BlockSize)
-	binary.LittleEndian.PutUint32(buf[8:12], h.Count)
-	binary.LittleEndian.PutUint32(buf[12:16], h.Reserved)
+// bytes serializes the header to a byte slice.
+func (h *header) bytes() []byte {
+	buf := make([]byte, headerSize)
+	copy(buf[0:4], h.magic[:])
+	binary.LittleEndian.PutUint16(buf[4:6], h.version)
+	binary.LittleEndian.PutUint16(buf[6:8], h.blockSize)
+	binary.LittleEndian.PutUint32(buf[8:12], h.count)
+	binary.LittleEndian.PutUint32(buf[12:16], h.crc32)
 	return buf
 }
 
-// NumBlocks returns the number of blocks needed to store count elements.
-func NumBlocks(count int) int {
+// numBlocks returns the number of blocks needed to store count elements.
+func numBlocks(count int) int {
 	if count <= 0 {
 		return 0
 	}
-	return (count + BlockSize - 1) / BlockSize
+	return (count + blockSize - 1) / blockSize
 }
 
 // DataSize returns the total size in bytes needed to store count elements
 // (header + data blocks).
 func DataSize(count int) int {
 	if count <= 0 {
-		return HeaderSize
+		return headerSize
 	}
-	return HeaderSize + NumBlocks(count)*BlockSizeBytes
+	return headerSize + numBlocks(count)*blockSizeBytes
 }
 
 // childIndex calculates the index of child i for node k in Eytzinger layout.
 // Formula: k * (BlockSize + 1) + i + 1 = k * 17 + i + 1
 func childIndex(k, i int) int {
-	return k*(BlockSize+1) + i + 1
+	return k*(blockSize+1) + i + 1
+}
+
+// computeCRC32 calculates CRC-32 checksum of the entire S-Tree data (header + blocks).
+// The CRC is computed with the CRC32 field in the header temporarily set to 0.
+func computeCRC32(data []byte) uint32 {
+	// Create a copy of the header with CRC32 field zeroed for computation
+	headerData := make([]byte, headerSize)
+	copy(headerData, data[:headerSize])
+	// Zero the CRC32 field (bytes 12-16) for consistent computation
+	headerData[12] = 0
+	headerData[13] = 0
+	headerData[14] = 0
+	headerData[15] = 0
+
+	// Compute CRC-32 over header + data blocks
+	hasher := crc32.NewIEEE()
+	hasher.Write(headerData)
+	hasher.Write(data[headerSize:])
+	return hasher.Sum32()
+}
+
+// validateCRC32 checks if the stored CRC-32 matches the computed CRC-32.
+func validateCRC32(data []byte) bool {
+	if len(data) < headerSize {
+		return false
+	}
+
+	storedCRC := binary.LittleEndian.Uint32(data[12:16])
+	computedCRC := computeCRC32(data)
+
+	return storedCRC == computedCRC
 }

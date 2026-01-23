@@ -100,7 +100,7 @@ func FuzzBuildFromKeyed(f *testing.F) {
 
 		// Verify all entries have valid indices set
 		for _, e := range entries {
-			if e.index > uint32(reader.Count()*BlockSize) {
+			if e.index > uint32(reader.Count()*blockSize) {
 				t.Errorf("Entry index %d out of bounds", e.index)
 			}
 
@@ -149,7 +149,7 @@ func FuzzSIMDConsistency(f *testing.F) {
 			t.Fatalf("Failed to create reader: %v", err)
 		}
 
-		blocks := reader.Data()[HeaderSize:]
+		blocks := reader.Data()[headerSize:]
 		numBlocks := reader.NumBlocks()
 
 		// Compare SIMD and generic results

@@ -68,7 +68,7 @@ func BenchmarkSearchCompare(b *testing.B) {
 		searchKey := uint32(size) // Middle element
 
 		b.Run(fmt.Sprintf("Optimized/n=%d", size), func(b *testing.B) {
-			blocks := reader.Data()[HeaderSize:]
+			blocks := reader.Data()[headerSize:]
 			numBlocks := reader.NumBlocks()
 			for i := 0; i < b.N; i++ {
 				searchGeneric(blocks, searchKey, numBlocks)
@@ -76,7 +76,7 @@ func BenchmarkSearchCompare(b *testing.B) {
 		})
 
 		b.Run(fmt.Sprintf("Simple/n=%d", size), func(b *testing.B) {
-			blocks := reader.Data()[HeaderSize:]
+			blocks := reader.Data()[headerSize:]
 			numBlocks := reader.NumBlocks()
 			for i := 0; i < b.N; i++ {
 				searchSimple(blocks, searchKey, numBlocks)
@@ -275,7 +275,7 @@ func BenchmarkSearchImplementations(b *testing.B) {
 			b.Fatal(err)
 		}
 
-		blocks := reader.Data()[HeaderSize:]
+		blocks := reader.Data()[headerSize:]
 		numBlocks := reader.NumBlocks()
 		searchKey := uint32(size)
 
@@ -328,6 +328,42 @@ func BenchmarkMemoryEfficiency(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
 				reader.Search(key)
+			}
+		})
+	}
+}
+
+// BenchmarkCRC32 benchmarks CRC-32 computation and validation performance.
+func BenchmarkCRC32(b *testing.B) {
+	sizes := []int{100, 1000, 10000, 100000}
+
+	for _, size := range sizes {
+		input := make([]uint32, size)
+		for i := range input {
+			input[i] = uint32(i * 2) // Even numbers
+		}
+
+		st, err := Build(input)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		data := st.Data()
+
+		b.Run(fmt.Sprintf("Compute/n=%d", size), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				computeCRC32(data)
+			}
+		})
+
+		reader, err := NewReader(data)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		b.Run(fmt.Sprintf("Validate/n=%d", size), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				reader.ValidateCRC32()
 			}
 		})
 	}

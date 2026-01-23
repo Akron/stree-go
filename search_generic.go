@@ -33,20 +33,20 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 	k := 0 // Current node index (start at root)
 
 	for k < numBlocks {
-		blockStart := k * BlockSizeBytes
-		childIdx := BlockSize // Default to rightmost child
+		blockStart := k * blockSizeBytes
+		childIdx := blockSize // Default to rightmost child
 
 		// Unrolled search for 16-element blocks
 		// This avoids loop overhead and allows better CPU branch prediction
 
 		// Position 0
 		v := binary.LittleEndian.Uint32(blocks[blockStart:])
-		if v == Sentinel {
+		if v == sentinel {
 			childIdx = 0
 			goto descend
 		}
 		if v == key {
-			return k*BlockSize + 0
+			return k*blockSize + 0
 		}
 		if v > key {
 			childIdx = 0
@@ -55,12 +55,12 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 
 		// Position 1
 		v = binary.LittleEndian.Uint32(blocks[blockStart+4:])
-		if v == Sentinel {
+		if v == sentinel {
 			childIdx = 1
 			goto descend
 		}
 		if v == key {
-			return k*BlockSize + 1
+			return k*blockSize + 1
 		}
 		if v > key {
 			childIdx = 1
@@ -69,12 +69,12 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 
 		// Position 2
 		v = binary.LittleEndian.Uint32(blocks[blockStart+8:])
-		if v == Sentinel {
+		if v == sentinel {
 			childIdx = 2
 			goto descend
 		}
 		if v == key {
-			return k*BlockSize + 2
+			return k*blockSize + 2
 		}
 		if v > key {
 			childIdx = 2
@@ -83,12 +83,12 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 
 		// Position 3
 		v = binary.LittleEndian.Uint32(blocks[blockStart+12:])
-		if v == Sentinel {
+		if v == sentinel {
 			childIdx = 3
 			goto descend
 		}
 		if v == key {
-			return k*BlockSize + 3
+			return k*blockSize + 3
 		}
 		if v > key {
 			childIdx = 3
@@ -97,12 +97,12 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 
 		// Position 4
 		v = binary.LittleEndian.Uint32(blocks[blockStart+16:])
-		if v == Sentinel {
+		if v == sentinel {
 			childIdx = 4
 			goto descend
 		}
 		if v == key {
-			return k*BlockSize + 4
+			return k*blockSize + 4
 		}
 		if v > key {
 			childIdx = 4
@@ -111,12 +111,12 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 
 		// Position 5
 		v = binary.LittleEndian.Uint32(blocks[blockStart+20:])
-		if v == Sentinel {
+		if v == sentinel {
 			childIdx = 5
 			goto descend
 		}
 		if v == key {
-			return k*BlockSize + 5
+			return k*blockSize + 5
 		}
 		if v > key {
 			childIdx = 5
@@ -125,12 +125,12 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 
 		// Position 6
 		v = binary.LittleEndian.Uint32(blocks[blockStart+24:])
-		if v == Sentinel {
+		if v == sentinel {
 			childIdx = 6
 			goto descend
 		}
 		if v == key {
-			return k*BlockSize + 6
+			return k*blockSize + 6
 		}
 		if v > key {
 			childIdx = 6
@@ -139,12 +139,12 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 
 		// Position 7
 		v = binary.LittleEndian.Uint32(blocks[blockStart+28:])
-		if v == Sentinel {
+		if v == sentinel {
 			childIdx = 7
 			goto descend
 		}
 		if v == key {
-			return k*BlockSize + 7
+			return k*blockSize + 7
 		}
 		if v > key {
 			childIdx = 7
@@ -153,12 +153,12 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 
 		// Position 8
 		v = binary.LittleEndian.Uint32(blocks[blockStart+32:])
-		if v == Sentinel {
+		if v == sentinel {
 			childIdx = 8
 			goto descend
 		}
 		if v == key {
-			return k*BlockSize + 8
+			return k*blockSize + 8
 		}
 		if v > key {
 			childIdx = 8
@@ -167,12 +167,12 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 
 		// Position 9
 		v = binary.LittleEndian.Uint32(blocks[blockStart+36:])
-		if v == Sentinel {
+		if v == sentinel {
 			childIdx = 9
 			goto descend
 		}
 		if v == key {
-			return k*BlockSize + 9
+			return k*blockSize + 9
 		}
 		if v > key {
 			childIdx = 9
@@ -181,12 +181,12 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 
 		// Position 10
 		v = binary.LittleEndian.Uint32(blocks[blockStart+40:])
-		if v == Sentinel {
+		if v == sentinel {
 			childIdx = 10
 			goto descend
 		}
 		if v == key {
-			return k*BlockSize + 10
+			return k*blockSize + 10
 		}
 		if v > key {
 			childIdx = 10
@@ -195,12 +195,12 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 
 		// Position 11
 		v = binary.LittleEndian.Uint32(blocks[blockStart+44:])
-		if v == Sentinel {
+		if v == sentinel {
 			childIdx = 11
 			goto descend
 		}
 		if v == key {
-			return k*BlockSize + 11
+			return k*blockSize + 11
 		}
 		if v > key {
 			childIdx = 11
@@ -209,12 +209,12 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 
 		// Position 12
 		v = binary.LittleEndian.Uint32(blocks[blockStart+48:])
-		if v == Sentinel {
+		if v == sentinel {
 			childIdx = 12
 			goto descend
 		}
 		if v == key {
-			return k*BlockSize + 12
+			return k*blockSize + 12
 		}
 		if v > key {
 			childIdx = 12
@@ -223,12 +223,12 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 
 		// Position 13
 		v = binary.LittleEndian.Uint32(blocks[blockStart+52:])
-		if v == Sentinel {
+		if v == sentinel {
 			childIdx = 13
 			goto descend
 		}
 		if v == key {
-			return k*BlockSize + 13
+			return k*blockSize + 13
 		}
 		if v > key {
 			childIdx = 13
@@ -237,12 +237,12 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 
 		// Position 14
 		v = binary.LittleEndian.Uint32(blocks[blockStart+56:])
-		if v == Sentinel {
+		if v == sentinel {
 			childIdx = 14
 			goto descend
 		}
 		if v == key {
-			return k*BlockSize + 14
+			return k*blockSize + 14
 		}
 		if v > key {
 			childIdx = 14
@@ -251,12 +251,12 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 
 		// Position 15
 		v = binary.LittleEndian.Uint32(blocks[blockStart+60:])
-		if v == Sentinel {
+		if v == sentinel {
 			childIdx = 15
 			goto descend
 		}
 		if v == key {
-			return k*BlockSize + 15
+			return k*blockSize + 15
 		}
 		if v > key {
 			childIdx = 15
@@ -267,7 +267,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 		// childIdx is already 16
 
 	descend:
-		k = k*(BlockSize+1) + childIdx + 1
+		k = k*(blockSize+1) + childIdx + 1
 	}
 
 	return -1 // Not found
@@ -283,20 +283,20 @@ func searchSimple(blocks []byte, key uint32, numBlocks int) int {
 	k := 0
 
 	for k < numBlocks {
-		blockStart := k * BlockSizeBytes
-		childIdx := BlockSize
+		blockStart := k * blockSizeBytes
+		childIdx := blockSize
 
-		for i := range BlockSize {
+		for i := range blockSize {
 			offset := blockStart + i*4
 			nodeKey := binary.LittleEndian.Uint32(blocks[offset:])
 
-			if nodeKey == Sentinel {
+			if nodeKey == sentinel {
 				childIdx = i
 				break
 			}
 
 			if nodeKey == key {
-				return k*BlockSize + i
+				return k*blockSize + i
 			}
 
 			if nodeKey > key {
@@ -305,7 +305,7 @@ func searchSimple(blocks []byte, key uint32, numBlocks int) int {
 			}
 		}
 
-		k = k*(BlockSize+1) + childIdx + 1
+		k = k*(blockSize+1) + childIdx + 1
 	}
 
 	return -1

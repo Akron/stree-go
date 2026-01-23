@@ -103,13 +103,14 @@ func BenchmarkBuild(b *testing.B) {
 	}
 }
 
-// TestEntry is a test type implementing Keyed interface.
+// BenchEntry is a test type implementing Keyed interface.
 type BenchEntry struct {
 	key   uint32
 	index uint32
 }
 
 func (e *BenchEntry) Key() uint32         { return e.key }
+func (e *BenchEntry) Index() uint32       { return e.index }
 func (e *BenchEntry) SetIndex(idx uint32) { e.index = idx }
 
 // BenchmarkBuildFromKeyed benchmarks interface-based tree construction.
@@ -157,7 +158,7 @@ func BenchmarkSortedIteration(b *testing.B) {
 		b.Run(fmt.Sprintf("Sorted/n=%d", size), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				count := 0
-				reader.Sorted()(func(v uint32) bool {
+				reader.Sorted()(func(v uint32, _ int) bool {
 					count++
 					return true
 				})
@@ -262,6 +263,48 @@ func BenchmarkContains(b *testing.B) {
 			reader.Contains(uint32((i%size)*2 + 1))
 		}
 	})
+}
+
+// BenchmarkSIMDvsGeneric compares SIMD and pure-Go search implementations.
+func BenchmarkSIMDvsGeneric(b *testing.B) {
+	if !SIMDAvailable() {
+		b.Skip("SIMD not available")
+	}
+
+	sizes := []int{1000, 10000, 100000}
+
+	for _, size := range sizes {
+		input := make([]uint32, size)
+		for i := range input {
+			input[i] = uint32(i * 2)
+		}
+
+		st, err := Build(input)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		reader, err := NewReader(st.Data())
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		blocks := reader.Data()[HeaderSize:]
+		numBlocks := reader.NumBlocks()
+		searchKey := uint32(size)
+
+		b.Run(fmt.Sprintf("SIMD/n=%d", size), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				search(blocks, searchKey, numBlocks)
+			}
+		})
+
+		b.Run(fmt.Sprintf("Generic/n=%d", size), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				searchGeneric(blocks, searchKey, numBlocks)
+			}
+		})
+	}
 }
 
 // BenchmarkMemoryEfficiency measures memory allocations.

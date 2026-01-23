@@ -94,71 +94,22 @@ func (r *Reader) All() func(yield func(uint32) bool) {
 	}
 }
 
-// Sorted returns an iterator over all values in sorted (ascending) order.
-// This performs an in-order traversal of the Eytzinger tree structure.
-// This is efficient for merging two trees or exporting sorted data.
-func (r *Reader) Sorted() func(yield func(uint32) bool) {
-	return func(yield func(uint32) bool) {
-		if r.numBlocks == 0 {
-			return
-		}
-		// In-order traversal of the Eytzinger tree
-		r.inOrderTraversal(0, 0, yield)
-	}
-}
-
-// inOrderTraversal performs an in-order traversal starting from block k, position i.
-// Returns false if iteration should stop.
-func (r *Reader) inOrderTraversal(k, i int, yield func(uint32) bool) bool {
-	if k >= r.numBlocks {
-		return true // Continue
-	}
-
-	// For each position in the block
-	for ; i < BlockSize; i++ {
-		// First, traverse left child (all keys less than current)
-		childK := childIndex(k, i)
-		if childK < r.numBlocks {
-			if !r.inOrderTraversal(childK, 0, yield) {
-				return false
-			}
-		}
-
-		// Then yield the current value
-		val := r.blockValue(k, i)
-		if val == Sentinel {
-			return true // No more valid values in this block
-		}
-		if !yield(val) {
-			return false
-		}
-	}
-
-	// Finally, traverse rightmost child
-	childK := childIndex(k, BlockSize)
-	if childK < r.numBlocks {
-		if !r.inOrderTraversal(childK, 0, yield) {
-			return false
-		}
-	}
-
-	return true
-}
-
-// SortedWithIndex returns an iterator over all (value, index) pairs in sorted order.
+// Sorted returns an iterator over all (value, index) pairs in sorted (ascending) order.
 // The index is the position in the S-Tree data structure.
+// This performs an in-order traversal of the Eytzinger tree structure.
 // This is useful for merging trees while preserving index information.
-func (r *Reader) SortedWithIndex() func(yield func(value uint32, index int) bool) {
+func (r *Reader) Sorted() func(yield func(value uint32, index int) bool) {
 	return func(yield func(value uint32, index int) bool) {
 		if r.numBlocks == 0 {
 			return
 		}
-		r.inOrderTraversalWithIndex(0, 0, yield)
+		r.inOrderTraversal(0, 0, yield)
 	}
 }
 
-// inOrderTraversalWithIndex performs an in-order traversal yielding both value and index.
-func (r *Reader) inOrderTraversalWithIndex(k, i int, yield func(value uint32, index int) bool) bool {
+// inOrderTraversal performs an in-order traversal yielding both value and index.
+// Returns false if iteration should stop.
+func (r *Reader) inOrderTraversal(k, i int, yield func(value uint32, index int) bool) bool {
 	if k >= r.numBlocks {
 		return true
 	}
@@ -167,7 +118,7 @@ func (r *Reader) inOrderTraversalWithIndex(k, i int, yield func(value uint32, in
 		// Traverse left child
 		childK := childIndex(k, i)
 		if childK < r.numBlocks {
-			if !r.inOrderTraversalWithIndex(childK, 0, yield) {
+			if !r.inOrderTraversal(childK, 0, yield) {
 				return false
 			}
 		}
@@ -186,7 +137,7 @@ func (r *Reader) inOrderTraversalWithIndex(k, i int, yield func(value uint32, in
 	// Traverse rightmost child
 	childK := childIndex(k, BlockSize)
 	if childK < r.numBlocks {
-		if !r.inOrderTraversalWithIndex(childK, 0, yield) {
+		if !r.inOrderTraversal(childK, 0, yield) {
 			return false
 		}
 	}

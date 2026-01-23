@@ -12,6 +12,8 @@ import (
 type Keyed interface {
 	// Key returns the uint32 key used for building and searching the S-Tree.
 	Key() uint32
+	// Index returns the stored index position (set by SetIndex during building).
+	Index() uint32
 	// SetIndex is called during building with the position of this key in the S-Tree.
 	// This allows correlating the key with additional data stored elsewhere.
 	SetIndex(idx uint32)
@@ -27,16 +29,17 @@ type STree struct {
 // Build creates a new S-Tree from the given slice of uint32 values.
 // The input slice does not need to be sorted; duplicates will be removed.
 // Returns ErrEmptyInput if the input is empty.
+//
+// WARNING: The input slice will be sorted in-place. If you need to preserve
+// the original order, make a copy before calling Build.
 func Build(values []uint32) (*STree, error) {
 	if len(values) == 0 {
 		return nil, ErrEmptyInput
 	}
 
-	// Sort and remove duplicates using slices.Compact
-	sorted := make([]uint32, len(values))
-	copy(sorted, values)
-	slices.Sort(sorted)
-	unique := slices.Compact(sorted)
+	// Sort in-place and remove duplicates using slices.Compact
+	slices.Sort(values)
+	unique := slices.Compact(values)
 
 	if len(unique) == 0 {
 		return nil, ErrEmptyInput
@@ -51,6 +54,9 @@ func Build(values []uint32) (*STree, error) {
 // This is the most efficient way to build a tree when you need index correlation.
 // Returns ErrEmptyInput if the input is empty.
 //
+// WARNING: The input slice will be reordered in-place (sorted by key).
+// If you need to preserve the original order, make a copy before calling BuildFromKeyed.
+//
 // This is useful when you need to correlate keys with additional data:
 //
 //	type Entry struct {
@@ -58,21 +64,20 @@ func Build(values []uint32) (*STree, error) {
 //	    index uint32
 //	    data  []byte
 //	}
-//	func (e *Entry) Key() uint32 { return e.key }
-//	func (e *Entry) SetIndex(idx uint32) { e.index = idx }
+//	func (e *Entry) Key() uint32            { return e.key }
+//	func (e *Entry) Index() uint32          { return e.index }
+//	func (e *Entry) SetIndex(idx uint32)    { e.index = idx }
 //
 //	entries := []*Entry{{key: 10}, {key: 5}, {key: 20}}
 //	tree, _ := stree.BuildFromKeyed(entries)
-//	// Now entries[i].index contains its position in the tree
+//	// Now entries[i].Index() contains its position in the tree
 func BuildFromKeyed[T Keyed](items []T) (*STree, error) {
 	if len(items) == 0 {
 		return nil, ErrEmptyInput
 	}
 
-	// Sort items by key
-	sorted := make([]T, len(items))
-	copy(sorted, items)
-	slices.SortFunc(sorted, func(a, b T) int {
+	// Sort items by key in-place
+	slices.SortFunc(items, func(a, b T) int {
 		ak, bk := a.Key(), b.Key()
 		if ak < bk {
 			return -1
@@ -84,11 +89,11 @@ func BuildFromKeyed[T Keyed](items []T) (*STree, error) {
 	})
 
 	// Remove duplicates and extract unique keys and items
-	unique := make([]uint32, 0, len(sorted))
-	uniqueItems := make([]T, 0, len(sorted))
+	unique := make([]uint32, 0, len(items))
+	uniqueItems := make([]T, 0, len(items))
 
 	var prevKey uint32
-	for i, item := range sorted {
+	for i, item := range items {
 		key := item.Key()
 		if i == 0 || key != prevKey {
 			unique = append(unique, key)

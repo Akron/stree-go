@@ -10,6 +10,11 @@ var search = searchGeneric
 // simdAvailable indicates if SIMD search is available on the current platform.
 var simdAvailable = false
 
+// SIMDAvailable returns true if SIMD-accelerated search is available.
+func SIMDAvailable() bool {
+	return simdAvailable
+}
+
 // searchGeneric implements S-Tree search using pure Go.
 // This is the reference implementation that works on all platforms.
 //

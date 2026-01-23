@@ -2,6 +2,7 @@ package stree
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -72,6 +73,7 @@ type TestEntry struct {
 }
 
 func (e *TestEntry) Key() uint32         { return e.key }
+func (e *TestEntry) Index() uint32       { return e.index }
 func (e *TestEntry) SetIndex(idx uint32) { e.index = idx }
 
 // TestBuildFromKeyed tests the interface-based building API.
@@ -262,7 +264,9 @@ func TestWriteToAndReadFrom(t *testing.T) {
 	input := []uint32{10, 20, 5, 30, 15, 25, 8, 12, 18, 22}
 
 	t.Run("write and read via buffer", func(t *testing.T) {
-		st, err := Build(input)
+		inputCopy := make([]uint32, len(input))
+		copy(inputCopy, input)
+		st, err := Build(inputCopy)
 		require.NoError(t, err)
 
 		// Write to buffer
@@ -283,7 +287,9 @@ func TestWriteToAndReadFrom(t *testing.T) {
 	})
 
 	t.Run("data is identical", func(t *testing.T) {
-		st, err := Build(input)
+		inputCopy := make([]uint32, len(input))
+		copy(inputCopy, input)
+		st, err := Build(inputCopy)
 		require.NoError(t, err)
 
 		var buf bytes.Buffer
@@ -349,7 +355,9 @@ func TestNewReader(t *testing.T) {
 // TestAllIterator tests the All() iterator.
 func TestAllIterator(t *testing.T) {
 	input := []uint32{5, 3, 8, 1, 9, 2, 7, 4, 6}
-	st, err := Build(input)
+	inputCopy := make([]uint32, len(input))
+	copy(inputCopy, input)
+	st, err := Build(inputCopy)
 	require.NoError(t, err)
 
 	reader, err := NewReader(st.Data())
@@ -379,7 +387,10 @@ func TestAllIterator(t *testing.T) {
 func TestSortedIterator(t *testing.T) {
 	t.Run("basic sorted iteration", func(t *testing.T) {
 		input := []uint32{5, 3, 8, 1, 9, 2, 7, 4, 6}
-		st, err := Build(input)
+		inputCopy := make([]uint32, len(input))
+		copy(inputCopy, input)
+
+		st, err := Build(inputCopy)
 		require.NoError(t, err)
 
 		reader, err := NewReader(st.Data())
@@ -387,7 +398,7 @@ func TestSortedIterator(t *testing.T) {
 
 		// Collect values in sorted order
 		var values []uint32
-		reader.Sorted()(func(v uint32) bool {
+		reader.Sorted()(func(v uint32, _ int) bool {
 			values = append(values, v)
 			return true
 		})
@@ -419,7 +430,7 @@ func TestSortedIterator(t *testing.T) {
 		require.NoError(t, err)
 
 		var values []uint32
-		reader.Sorted()(func(v uint32) bool {
+		reader.Sorted()(func(v uint32, _ int) bool {
 			values = append(values, v)
 			return true
 		})
@@ -450,7 +461,7 @@ func TestSortedIterator(t *testing.T) {
 
 		// Stop after 10 values
 		var values []uint32
-		reader.Sorted()(func(v uint32) bool {
+		reader.Sorted()(func(v uint32, _ int) bool {
 			values = append(values, v)
 			return len(values) < 10
 		})
@@ -466,7 +477,10 @@ func TestSortedIterator(t *testing.T) {
 // TestSortedWithIndex tests sorted iteration with index information.
 func TestSortedWithIndex(t *testing.T) {
 	input := []uint32{50, 30, 70, 20, 40, 60, 80}
-	st, err := Build(input)
+	inputCopy := make([]uint32, len(input))
+	copy(inputCopy, input)
+
+	st, err := Build(inputCopy)
 	require.NoError(t, err)
 
 	reader, err := NewReader(st.Data())
@@ -478,7 +492,7 @@ func TestSortedWithIndex(t *testing.T) {
 	}
 
 	var pairs []pair
-	reader.SortedWithIndex()(func(value uint32, index int) bool {
+	reader.Sorted()(func(value uint32, index int) bool {
 		pairs = append(pairs, pair{value, index})
 		return true
 	})
@@ -548,13 +562,7 @@ func TestSearchConsistency(t *testing.T) {
 	}
 
 	for _, input := range testCases {
-		st, err := Build(input)
-		require.NoError(t, err)
-
-		reader, err := NewReader(st.Data())
-		require.NoError(t, err)
-
-		// Get unique values
+		// Get unique values before Build modifies the slice
 		seen := make(map[uint32]bool)
 		var unique []uint32
 		for _, v := range input {
@@ -563,6 +571,15 @@ func TestSearchConsistency(t *testing.T) {
 				unique = append(unique, v)
 			}
 		}
+
+		// Make a copy since Build sorts in-place
+		inputCopy := make([]uint32, len(input))
+		copy(inputCopy, input)
+		st, err := Build(inputCopy)
+		require.NoError(t, err)
+
+		reader, err := NewReader(st.Data())
+		require.NoError(t, err)
 
 		// Verify each unique value can be found
 		for _, key := range unique {
@@ -614,5 +631,46 @@ func TestDataSize(t *testing.T) {
 	for _, tt := range tests {
 		assert.Equal(t, tt.expected, DataSize(tt.count),
 			"DataSize(%d) should be %d", tt.count, tt.expected)
+	}
+}
+
+// TestSIMDConsistency verifies SIMD and pure-Go implementations return same results.
+func TestSIMDConsistency(t *testing.T) {
+	sizes := []int{1, 10, 100, 1000, 10000}
+
+	for _, size := range sizes {
+		t.Run(fmt.Sprintf("n=%d", size), func(t *testing.T) {
+			input := make([]uint32, size)
+			for i := range input {
+				input[i] = uint32(i * 2)
+			}
+
+			st, err := Build(input)
+			require.NoError(t, err)
+
+			reader, err := NewReader(st.Data())
+			require.NoError(t, err)
+
+			blocks := reader.Data()[HeaderSize:]
+			numBlocks := reader.NumBlocks()
+
+			// Test keys that exist
+			for i := 0; i < size; i += max(1, size/100) {
+				key := uint32(i * 2)
+				genericResult := searchGeneric(blocks, key, numBlocks)
+				simdResult := search(blocks, key, numBlocks)
+				assert.Equal(t, genericResult, simdResult,
+					"mismatch for existing key %d: generic=%d, simd=%d", key, genericResult, simdResult)
+			}
+
+			// Test keys that don't exist
+			for i := 0; i < size; i += max(1, size/100) {
+				key := uint32(i*2 + 1) // Odd numbers don't exist
+				genericResult := searchGeneric(blocks, key, numBlocks)
+				simdResult := search(blocks, key, numBlocks)
+				assert.Equal(t, genericResult, simdResult,
+					"mismatch for non-existing key %d: generic=%d, simd=%d", key, genericResult, simdResult)
+			}
+		})
 	}
 }

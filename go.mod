@@ -4,7 +4,7 @@ go 1.22.2
 
 require (
 	github.com/mmcloughlin/avo v0.6.0
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.11.1
 	golang.org/x/sys v0.22.0
 )
 

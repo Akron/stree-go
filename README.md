@@ -1,4 +1,4 @@
-# STree-Go
+# S-Tree
 
 A static B-tree implementation in Go based on the algorithm described
 at [Algorithmica - S-Tree](https://en.algorithmica.org/hpc/data-structures/s-tree/)
@@ -101,25 +101,6 @@ func main() {
 }
 ```
 
-### Data Integrity (CRC-32)
-
-STree automatically computes and stores a CRC-32 checksum for data integrity validation. The checksum covers the entire file contents and is computed during tree construction.
-
-```go
-// Reader creation with automatic integrity validation
-reader, err := stree.NewReaderWithValidation(data)
-
-// Standard reader creation (no validation)
-reader, err := stree.NewReader(data)
-
-// Manual integrity check
-if reader.ValidateCRC32() {
-    fmt.Println("Data integrity verified")
-} else {
-    fmt.Println("Data corruption detected")
-}
-```
-
 ### Serialization and Memory Mapping
 
 ```go
@@ -178,5 +159,13 @@ SIMD provides 2-4x speedup compared to pure Go implementation.
 
 ## Limitations
 
-- **Values must be < 0x80000000 (uint31)**: All keys must be in the range [0, 2^31 - 1]. This restriction is enforced at build time and search time. `Build()` and `BuildFromKeyed()` will return `ErrValueTooLarge` if any value exceeds this limit. `Search()` returns -1 immediately for keys >= 0x80000000. This constraint ensures consistent behavior between pure Go and SIMD implementations, as SIMD comparison uses signed arithmetic.
-- **In-place modification**: `Build()` and `BuildFromKeyed()` sort the input slice in place.
+- Values must be (uint31): All keys must be in the range [0, 2^31 - 1]. This restriction is enforced at build time and search time. `Build()` and `BuildFromKeyed()` will return `ErrValueTooLarge` if any value exceeds this limit. `Search()` returns -1 immediately for keys >= 0x80000000. This constraint ensures consistent behavior between pure Go and SIMD implementations, as SIMD comparison uses signed arithmetic.
+- In-place modification: `Build()` and `BuildFromKeyed()` sort the input slice in place.
+
+## Disclaimer
+
+This library was developed with AI assistance (Claude Opus 4.5).
+
+## Copyright
+
+Copyright (c) 2025-2026 Nils Diewald

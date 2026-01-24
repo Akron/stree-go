@@ -1,7 +1,6 @@
 package stree
 
 import (
-	"encoding/binary"
 	"io"
 	"slices"
 )
@@ -162,7 +161,7 @@ func buildFromUnique(unique []uint32) (*STree, error) {
 func buildEytzinger(unique []uint32, blocks []byte, numBlocks int) {
 	// Initialize all blocks with sentinel values
 	for i := 0; i < len(blocks); i += 4 {
-		binary.LittleEndian.PutUint32(blocks[i:], sentinel)
+		be.PutUint32(blocks[i:], sentinel)
 	}
 
 	t := 0 // Current position in input array
@@ -174,7 +173,7 @@ func buildEytzinger(unique []uint32, blocks []byte, numBlocks int) {
 				build(childIndex(k, i))
 				if t < len(unique) {
 					offset := k*blockSizeBytes + i*4
-					binary.LittleEndian.PutUint32(blocks[offset:], unique[t])
+					be.PutUint32(blocks[offset:], unique[t])
 					t++
 				}
 			}
@@ -237,7 +236,7 @@ func buildFromUniqueKeyed[T Keyed](unique []uint32, items []T) (*STree, error) {
 func buildEytzingerWithIndex[T Keyed](unique []uint32, items []T, blocks []byte, numBlocks int) {
 	// Initialize all blocks with sentinel values
 	for i := 0; i < len(blocks); i += 4 {
-		binary.LittleEndian.PutUint32(blocks[i:], sentinel)
+		be.PutUint32(blocks[i:], sentinel)
 	}
 
 	t := 0 // Current position in input array
@@ -253,7 +252,7 @@ func buildEytzingerWithIndex[T Keyed](unique []uint32, items []T, blocks []byte,
 				// Place current element or sentinel
 				if t < len(unique) {
 					offset := k*blockSizeBytes + i*4
-					binary.LittleEndian.PutUint32(blocks[offset:], unique[t])
+					be.PutUint32(blocks[offset:], unique[t])
 
 					// Set index on the item if provided - this is the key optimization!
 					// The position in the tree is: block * BlockSize + position in block

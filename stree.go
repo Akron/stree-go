@@ -8,7 +8,6 @@
 package stree
 
 import (
-	"encoding/binary"
 	"errors"
 	"hash/crc32"
 )
@@ -69,10 +68,10 @@ func parseHeader(data []byte) (*header, error) {
 	}
 
 	h := &header{
-		version:   binary.LittleEndian.Uint16(data[4:6]),
-		blockSize: binary.LittleEndian.Uint16(data[6:8]),
-		count:     binary.LittleEndian.Uint32(data[8:12]),
-		crc32:     binary.LittleEndian.Uint32(data[12:16]),
+		version:   be.Uint16(data[4:6]),
+		blockSize: be.Uint16(data[6:8]),
+		count:     be.Uint32(data[8:12]),
+		crc32:     be.Uint32(data[12:16]),
 	}
 	copy(h.magic[:], data[0:4])
 
@@ -98,10 +97,10 @@ func parseHeader(data []byte) (*header, error) {
 func (h *header) bytes() []byte {
 	buf := make([]byte, headerSize)
 	copy(buf[0:4], h.magic[:])
-	binary.LittleEndian.PutUint16(buf[4:6], h.version)
-	binary.LittleEndian.PutUint16(buf[6:8], h.blockSize)
-	binary.LittleEndian.PutUint32(buf[8:12], h.count)
-	binary.LittleEndian.PutUint32(buf[12:16], h.crc32)
+	be.PutUint16(buf[4:6], h.version)
+	be.PutUint16(buf[6:8], h.blockSize)
+	be.PutUint32(buf[8:12], h.count)
+	be.PutUint32(buf[12:16], h.crc32)
 	return buf
 }
 
@@ -153,7 +152,7 @@ func validateCRC32(data []byte) bool {
 		return false
 	}
 
-	storedCRC := binary.LittleEndian.Uint32(data[12:16])
+	storedCRC := be.Uint32(data[12:16])
 	computedCRC := computeCRC32(data)
 
 	return storedCRC == computedCRC

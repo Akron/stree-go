@@ -1,7 +1,5 @@
 package stree
 
-import "encoding/binary"
-
 // search is the function variable that holds the current search implementation.
 // It is set to searchGeneric by default, but can be replaced with SIMD
 // implementations on supported architectures via initSIMDSelection().
@@ -16,15 +14,10 @@ func SIMDAvailable() bool {
 }
 
 // searchGeneric implements S-Tree search using pure Go.
-// This is the reference implementation that works on all platforms.
-//
-// The search follows the implicit B-tree structure using Eytzinger numbering:
-// - Start at root node (k = 0)
-// - For each node, find the first key >= search key
-// - Descend to the appropriate child using: k * 17 + childIndex + 1
-// - Repeat until key is found or we exceed the number of blocks
-//
+// This should work on all platforms.
 // Time complexity: O(log₁₇ n) where n is the number of elements.
+// This is an optimized implementation - for an easier to understand
+// implementation of the algorithm, see searchSimple.
 func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 	if len(blocks) == 0 || numBlocks == 0 {
 		return -1
@@ -40,7 +33,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 		// This avoids loop overhead and allows better CPU branch prediction
 
 		// Position 0
-		v := binary.LittleEndian.Uint32(blocks[blockStart:])
+		v := be.Uint32(blocks[blockStart:])
 		if v == sentinel {
 			childIdx = 0
 			goto descend
@@ -54,7 +47,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 		}
 
 		// Position 1
-		v = binary.LittleEndian.Uint32(blocks[blockStart+4:])
+		v = be.Uint32(blocks[blockStart+4:])
 		if v == sentinel {
 			childIdx = 1
 			goto descend
@@ -68,7 +61,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 		}
 
 		// Position 2
-		v = binary.LittleEndian.Uint32(blocks[blockStart+8:])
+		v = be.Uint32(blocks[blockStart+8:])
 		if v == sentinel {
 			childIdx = 2
 			goto descend
@@ -82,7 +75,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 		}
 
 		// Position 3
-		v = binary.LittleEndian.Uint32(blocks[blockStart+12:])
+		v = be.Uint32(blocks[blockStart+12:])
 		if v == sentinel {
 			childIdx = 3
 			goto descend
@@ -96,7 +89,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 		}
 
 		// Position 4
-		v = binary.LittleEndian.Uint32(blocks[blockStart+16:])
+		v = be.Uint32(blocks[blockStart+16:])
 		if v == sentinel {
 			childIdx = 4
 			goto descend
@@ -110,7 +103,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 		}
 
 		// Position 5
-		v = binary.LittleEndian.Uint32(blocks[blockStart+20:])
+		v = be.Uint32(blocks[blockStart+20:])
 		if v == sentinel {
 			childIdx = 5
 			goto descend
@@ -124,7 +117,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 		}
 
 		// Position 6
-		v = binary.LittleEndian.Uint32(blocks[blockStart+24:])
+		v = be.Uint32(blocks[blockStart+24:])
 		if v == sentinel {
 			childIdx = 6
 			goto descend
@@ -138,7 +131,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 		}
 
 		// Position 7
-		v = binary.LittleEndian.Uint32(blocks[blockStart+28:])
+		v = be.Uint32(blocks[blockStart+28:])
 		if v == sentinel {
 			childIdx = 7
 			goto descend
@@ -152,7 +145,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 		}
 
 		// Position 8
-		v = binary.LittleEndian.Uint32(blocks[blockStart+32:])
+		v = be.Uint32(blocks[blockStart+32:])
 		if v == sentinel {
 			childIdx = 8
 			goto descend
@@ -166,7 +159,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 		}
 
 		// Position 9
-		v = binary.LittleEndian.Uint32(blocks[blockStart+36:])
+		v = be.Uint32(blocks[blockStart+36:])
 		if v == sentinel {
 			childIdx = 9
 			goto descend
@@ -180,7 +173,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 		}
 
 		// Position 10
-		v = binary.LittleEndian.Uint32(blocks[blockStart+40:])
+		v = be.Uint32(blocks[blockStart+40:])
 		if v == sentinel {
 			childIdx = 10
 			goto descend
@@ -194,7 +187,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 		}
 
 		// Position 11
-		v = binary.LittleEndian.Uint32(blocks[blockStart+44:])
+		v = be.Uint32(blocks[blockStart+44:])
 		if v == sentinel {
 			childIdx = 11
 			goto descend
@@ -208,7 +201,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 		}
 
 		// Position 12
-		v = binary.LittleEndian.Uint32(blocks[blockStart+48:])
+		v = be.Uint32(blocks[blockStart+48:])
 		if v == sentinel {
 			childIdx = 12
 			goto descend
@@ -222,7 +215,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 		}
 
 		// Position 13
-		v = binary.LittleEndian.Uint32(blocks[blockStart+52:])
+		v = be.Uint32(blocks[blockStart+52:])
 		if v == sentinel {
 			childIdx = 13
 			goto descend
@@ -236,7 +229,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 		}
 
 		// Position 14
-		v = binary.LittleEndian.Uint32(blocks[blockStart+56:])
+		v = be.Uint32(blocks[blockStart+56:])
 		if v == sentinel {
 			childIdx = 14
 			goto descend
@@ -250,7 +243,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 		}
 
 		// Position 15
-		v = binary.LittleEndian.Uint32(blocks[blockStart+60:])
+		v = be.Uint32(blocks[blockStart+60:])
 		if v == sentinel {
 			childIdx = 15
 			goto descend
@@ -273,7 +266,7 @@ func searchGeneric(blocks []byte, key uint32, numBlocks int) int {
 	return -1 // Not found
 }
 
-// searchSimple is a simpler implementation used for comparison/fallback.
+// searchSimple is a naive implementation used for comparison/fallback.
 // It uses straightforward sequential search within each block.
 func searchSimple(blocks []byte, key uint32, numBlocks int) int {
 	if len(blocks) == 0 || numBlocks == 0 {
@@ -288,7 +281,7 @@ func searchSimple(blocks []byte, key uint32, numBlocks int) int {
 
 		for i := range blockSize {
 			offset := blockStart + i*4
-			nodeKey := binary.LittleEndian.Uint32(blocks[offset:])
+			nodeKey := be.Uint32(blocks[offset:])
 
 			if nodeKey == sentinel {
 				childIdx = i

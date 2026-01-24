@@ -11,14 +11,11 @@ type Reader struct {
 	numBlocks int    // Number of blocks
 }
 
-// NewReader creates a Reader from a byte slice.
+var be = binary.LittleEndian
+
+// NewReader creates a Reader from a serialized byte slice.
 // The slice must contain valid S-Tree data (header + blocks).
 // The slice is NOT copied; the Reader references the original data.
-//
-// This is designed to work with any byte slice source, including:
-//   - In-memory data from STree.Data()
-//   - Memory-mapped files (using syscall.Mmap or mmap libraries)
-//   - Data read from disk
 func NewReader(data []byte) (*Reader, error) {
 	header, err := parseHeader(data)
 	if err != nil {
@@ -75,8 +72,8 @@ func (r *Reader) Data() []byte {
 // Search searches for a key in the S-Tree using tree traversal.
 // Returns the position in the data array where the key is found, or -1 if not found.
 // Returns -1 immediately if key >= 0x80000000 (not a valid uint31).
-// This uses the optimized pure-Go implementation; SIMD-optimized versions are
-// available on supported architectures via SearchSIMD.
+// This uses the optimized pure-Go implementation if no SIMD-optimized version
+// can be used for the current architecture.
 func (r *Reader) Search(key uint32) int {
 	// Keys >= 0x80000000 cannot exist in a valid tree
 	if key > MaxValue {
@@ -93,7 +90,7 @@ func (r *Reader) Contains(key uint32) bool {
 // blockValue reads a uint32 value from block k at position i.
 func (r *Reader) blockValue(k, i int) uint32 {
 	offset := k*blockSizeBytes + i*4
-	return binary.LittleEndian.Uint32(r.blocks[offset:])
+	return be.Uint32(r.blocks[offset:])
 }
 
 // All returns an iterator over all non-sentinel values in the tree.

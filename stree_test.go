@@ -9,6 +9,172 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Example demonstrates basic S-Tree usage: building a tree from values and searching.
+func Example() {
+	// Build a tree from uint32 values.
+	// Note: The input slice will be sorted and deduplicated in-place.
+	values := []uint32{42, 17, 100, 5, 73}
+	tree, err := Build(values)
+	if err != nil {
+		panic(err)
+	}
+
+	// Create a reader from the tree's serialized data.
+	reader, err := NewReader(tree.Data())
+	if err != nil {
+		panic(err)
+	}
+
+	// Search for a value. Returns the position if found, -1 if not.
+	pos := reader.Search(42)
+	fmt.Printf("Search(42): found=%v\n", pos >= 0)
+
+	pos = reader.Search(99)
+	fmt.Printf("Search(99): found=%v\n", pos >= 0)
+
+	// Use Contains for simple membership testing.
+	fmt.Printf("Contains(100): %v\n", reader.Contains(100))
+
+	fmt.Printf("Count: %d\n", reader.Count())
+	// Output:
+	// Search(42): found=true
+	// Search(99): found=false
+	// Contains(100): true
+	// Count: 5
+}
+
+// ExampleBuild demonstrates building an S-Tree from uint32 values.
+func ExampleBuild() {
+	// Input does not need to be sorted; duplicates are removed automatically.
+	values := []uint32{30, 10, 20, 10, 40, 20}
+	tree, err := Build(values)
+	if err != nil {
+		panic(err)
+	}
+
+	// Count reflects unique values only.
+	fmt.Printf("Unique count: %d\n", tree.Count())
+
+	// The tree data can be written to disk or memory-mapped later.
+	fmt.Printf("Data size: %d bytes\n", len(tree.Data()))
+	// Output:
+	// Unique count: 4
+	// Data size: 80 bytes
+}
+
+// Document is an example type implementing the Keyed interface.
+// This allows associating additional data with each key in the tree.
+type Document struct {
+	ID       uint32
+	Position uint32 // Set by BuildFromKeyed during tree construction
+	Title    string
+}
+
+func (d *Document) Key() uint32         { return d.ID }
+func (d *Document) Index() uint32       { return d.Position }
+func (d *Document) SetIndex(idx uint32) { d.Position = idx }
+
+// ExampleBuildFromKeyed demonstrates building an S-Tree while tracking
+// the position of each item in the tree structure.
+func ExampleBuildFromKeyed() {
+	// Create documents with IDs (keys) and associated data.
+	docs := []*Document{
+		{ID: 300, Title: "Third"},
+		{ID: 100, Title: "First"},
+		{ID: 200, Title: "Second"},
+	}
+
+	// Build the tree. Each document's Position field will be set to its
+	// index in the tree, enabling O(1) lookup of associated data.
+	tree, err := BuildFromKeyed(docs)
+	if err != nil {
+		panic(err)
+	}
+
+	// After building, we can look up documents by their tree position.
+	reader, err := NewReader(tree.Data())
+	if err != nil {
+		panic(err)
+	}
+
+	// Search returns the same position that was stored in the Document.
+	pos := reader.Search(200)
+	fmt.Printf("Position of ID 200: %d\n", pos)
+
+	// Find the document with that position.
+	for _, doc := range docs {
+		if int(doc.Position) == pos {
+			fmt.Printf("Found: %s\n", doc.Title)
+		}
+	}
+	// Output:
+	// Position of ID 200: 1
+	// Found: Second
+}
+
+// ExampleReader_Sorted demonstrates iterating through all values in sorted order.
+// This performs an in-order traversal of the Eytzinger tree structure,
+// yielding both the value and its position in the tree.
+func ExampleReader_Sorted() {
+	values := []uint32{50, 10, 40, 20, 30}
+	tree, _ := Build(values)
+	reader, _ := NewReader(tree.Data())
+
+	// Sorted() returns an iterator that yields (value, index) pairs
+	// in ascending order by value.
+	fmt.Println("Values in sorted order:")
+	reader.Sorted()(func(value uint32, index int) bool {
+		fmt.Printf("  value=%d, index=%d\n", value, index)
+		return true // return false to stop iteration early
+	})
+	// Output:
+	// Values in sorted order:
+	//   value=10, index=0
+	//   value=20, index=1
+	//   value=30, index=2
+	//   value=40, index=3
+	//   value=50, index=4
+}
+
+// ExampleSTree_WriteTo demonstrates serializing an S-Tree to a writer.
+func ExampleSTree_WriteTo() {
+	values := []uint32{1, 2, 3, 4, 5}
+	tree, _ := Build(values)
+
+	// Write to any io.Writer (file, buffer, network, etc.)
+	var buf bytes.Buffer
+	n, err := tree.WriteTo(&buf)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("Wrote %d bytes\n", n)
+
+	// The serialized data can be read back with NewReader.
+	reader, _ := NewReader(buf.Bytes())
+	fmt.Printf("Reader count: %d\n", reader.Count())
+	// Output:
+	// Wrote 80 bytes
+	// Reader count: 5
+}
+
+// ExampleNewReaderWithValidation demonstrates creating a reader with CRC-32 validation.
+func ExampleNewReaderWithValidation() {
+	tree, _ := Build([]uint32{10, 20, 30})
+
+	// NewReaderWithValidation checks the CRC-32 checksum during construction.
+	// Use this when loading from untrusted sources (network, disk).
+	reader, err := NewReaderWithValidation(tree.Data())
+	if err != nil {
+		fmt.Println("Data integrity check failed!")
+		return
+	}
+
+	fmt.Printf("Valid data, count: %d\n", reader.Count())
+	// Output:
+	// Valid data, count: 3
+}
+
 // TestBuildBasic tests basic S-Tree construction.
 func TestBuildBasic(t *testing.T) {
 	t.Run("single element", func(t *testing.T) {

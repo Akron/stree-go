@@ -10,7 +10,7 @@ STree-Go is designed for high-performance, cache-efficient lookups. It uses Eytz
 
 The data structure is designed to work directly with memory-mapped byte slices, making it ideal for persistent, disk-backed indices. Search operations allocate no memory, ensuring predictable performance without GC pressure. Once built, the tree structure is immutable, making it safe for concurrent read access.
 
-The data structure is documented in `stree.ksy` (Kaitai Struct format).
+The data structure is documented in `stree.ksy` as a [Kaitai Struct format](https://kaitai.io/).
 
 ## Usage
 
@@ -18,144 +18,80 @@ The data structure is documented in `stree.ksy` (Kaitai Struct format).
 package main
 
 import (
-    "fmt"
-    "github.com/Akron/stree-go"
+	"fmt"
+	"os"
+
+	"github.com/Akron/stree-go"
 )
 
 func main() {
-    // Build a tree from uint32 values
-    // WARNING: The input slice will be sorted and deduplicated in-place
-    values := []uint32{42, 17, 100, 5, 73, 88}
-    tree, err := stree.Build(values)
-    if err != nil {
-        panic(err)
-    }
+	// 1. Build the S-Tree
+	
+	// Input: unsorted uint32 values with duplicates.
+	values := []uint32{42, 17, 100, 5, 73, 88, 42, 17}
+	
+	tree, err := stree.Build(values)
+	if err != nil {
+		panic(err)
+	}
+	
+	// 2. Serialize to disk
+	file, err := os.Create("index.stree")
+	if err != nil {
+		panic(err)
+	}
+	
+	_, err = tree.WriteTo(file)
+	if err != nil {
+		file.Close()
+		panic(err)
+	}
+	file.Close()
+	
+	// 3. Load the S-Tree
+	data, err := os.ReadFile("index.stree")
+	if err != nil {
+		panic(err)
+	}
+	
+	reader, err := stree.NewReaderWithValidation(data)
+	if err != nil {
+		panic(err)
+	}
 
-    // Create a reader from the tree data
-    reader, err := stree.NewReader(tree.Data())
-    if err != nil {
-        panic(err)
-    }
-
-    // Search for values
-    pos := reader.Search(42)
-    if pos >= 0 {
-        fmt.Printf("Found 42 at position %d\n", pos)
-    }
-
-    // Check if value exists
-    if reader.Contains(100) {
-        fmt.Println("100 exists in the tree")
-    }
-
-    // Get count of unique values
-    fmt.Printf("Tree contains %d unique values\n", reader.Count())
-}
+    // 4. Search for keys
+	// returns the position in the tree, or -1 if not found.
+	// The position can be used to correlate
+	// with external data.
+	keysToFind := []uint32{42, 100, 999}
+	for _, key := range keysToFind {
+		pos := reader.Search(key)
+		if pos >= 0 {
+			fmt.Printf("Found %d at position %d\n", key, pos)
+		} else {
+			fmt.Printf("Key %d not found\n", key)
+		}
+	}
+	}
 ```
 
-### Using the Keyed Interface
+## Development
 
-For more advanced use cases where you need to associate data with keys:
+Assembly is generated using [avo](https://github.com/mmcloughlin/avo). Regeneration is done using
 
-```go
-package main
-
-import (
-    "fmt"
-    "github.com/Akron/stree-go"
-)
-
-// Your struct must implement the Keyed interface
-type Document struct {
-    ID       uint32
-    Position uint32  // Will be set by BuildFromKeyed
-    Title    string
-}
-
-func (d *Document) Key() uint32         { return d.ID }
-func (d *Document) SetIndex(idx uint32) { d.Position = idx }
-func (d *Document) Index() uint32       { return d.Position }
-
-func main() {
-    docs := []*Document{
-        {ID: 1001, Title: "First Document"},
-        {ID: 500, Title: "Second Document"},
-        {ID: 2000, Title: "Third Document"},
-    }
-
-    // Build tree - WARNING: slice will be sorted in-place
-    tree, err := stree.BuildFromKeyed(docs)
-    if err != nil {
-        panic(err)
-    }
-
-    // After building, each document's Position field contains its index
-    for _, doc := range docs {
-        fmt.Printf("Document %d (%s) is at position %d\n", 
-            doc.ID, doc.Title, doc.Position)
-    }
-
-    // The tree can be serialized and used later
-    data := tree.Data()
-    fmt.Printf("Tree size: %d bytes\n", len(data))
-}
-```
-
-### Serialization and Memory Mapping
-
-```go
-package main
-
-import (
-    "os"
-    "syscall"
-    "github.com/Akron/stree-go"
-)
-
-func main() {
-    // Build and save to file
-    values := []uint32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-    tree, _ := stree.Build(values)
-    
-    f, _ := os.Create("tree.bin")
-    f.Write(tree.Data())
-    f.Close()
-
-    // Load via mmap for efficient read-only access
-    f, _ = os.Open("tree.bin")
-    stat, _ := f.Stat()
-    data, _ := syscall.Mmap(int(f.Fd()), 0, int(stat.Size()),
-        syscall.PROT_READ, syscall.MAP_SHARED)
-    
-    reader, _ := stree.NewReader(data)
-    fmt.Printf("Loaded tree with %d values\n", reader.Count())
-    
-    syscall.Munmap(data)
-    f.Close()
-}
-```
-
-### Sorted Iteration
-
-```go
-// Iterate through all keys in sorted order
-reader.Sorted()(func(value uint32, index int) bool {
-    fmt.Printf("Value: %d, Index: %d\n", value, index)
-    return true // return false to stop iteration
-})
+```shell
+$ go generate ./internal/asm
 ```
 
 ## Performance
 
 Typical benchmark results on Intel Core Ultra 5 125H:
 
-| Operation | Size | Generic | SSE4.2 | AVX2 |
-|-----------|------|---------|--------|------|
-| Search | 1,000 | 25 ns | 11 ns | 8 ns |
-| Search | 10,000 | 16 ns | 13 ns | 11 ns |
-| Search | 100,000 | 59 ns | 20 ns | 13 ns |
-
-SIMD provides 2-4x speedup compared to pure Go implementation.
+| Operation | Size    | Generic | SSE4.2 | AVX2  |
+|-----------|---------|---------|--------|-------|
+| Search    | 1,000   | 25 ns   | 11 ns  | 8 ns  |
+| Search    | 10,000  | 16 ns   | 13 ns  | 11 ns |
+| Search    | 100,000 | 59 ns   | 20 ns  | 13 ns |
 
 ## Limitations
 

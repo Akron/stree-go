@@ -159,9 +159,11 @@ func buildFromUnique(unique []uint32) (*STree, error) {
 
 // buildEytzinger constructs the S-Tree using Eytzinger numeration (no index tracking).
 func buildEytzinger(unique []uint32, blocks []byte, numBlocks int) {
-	// Initialize all blocks with sentinel values
-	for i := 0; i < len(blocks); i += 4 {
-		be.PutUint32(blocks[i:], sentinel)
+	// Initialize all blocks with sentinel values (0xFFFFFFFF)
+	// Write 8 bytes at a time for efficiency; blocks are always multiples of 64 bytes
+	const sentinel64 = uint64(0xFFFFFFFFFFFFFFFF)
+	for i := 0; i < len(blocks); i += 8 {
+		be.PutUint64(blocks[i:], sentinel64)
 	}
 
 	t := 0 // Current position in input array
@@ -234,9 +236,11 @@ func buildFromUniqueKeyed[T Keyed](unique []uint32, items []T) (*STree, error) {
 //	    }
 //	}
 func buildEytzingerWithIndex[T Keyed](unique []uint32, items []T, blocks []byte, numBlocks int) {
-	// Initialize all blocks with sentinel values
-	for i := 0; i < len(blocks); i += 4 {
-		be.PutUint32(blocks[i:], sentinel)
+	// Initialize all blocks with sentinel values (0xFFFFFFFF)
+	// Write 8 bytes at a time for efficiency; blocks are always multiples of 64 bytes
+	const sentinel64 = uint64(0xFFFFFFFFFFFFFFFF)
+	for i := 0; i < len(blocks); i += 8 {
+		be.PutUint64(blocks[i:], sentinel64)
 	}
 
 	t := 0 // Current position in input array

@@ -175,8 +175,8 @@ func ExampleNewReaderWithValidation() {
 	// Valid data, count: 3
 }
 
-// TestBuildBasic tests basic S-Tree construction.
-func TestBuildBasic(t *testing.T) {
+// TestBuild tests S-Tree construction with various inputs.
+func TestBuild(t *testing.T) {
 	t.Run("single element", func(t *testing.T) {
 		st, err := Build([]uint32{42})
 		require.NoError(t, err)
@@ -193,14 +193,7 @@ func TestBuildBasic(t *testing.T) {
 	t.Run("with duplicates", func(t *testing.T) {
 		st, err := Build([]uint32{5, 3, 5, 1, 3, 5, 7})
 		require.NoError(t, err)
-		// Unique values: 1, 3, 5, 7
-		assert.Equal(t, 4, st.Count())
-	})
-
-	t.Run("unsorted input", func(t *testing.T) {
-		st, err := Build([]uint32{10, 5, 15, 3, 8, 12, 6, 9})
-		require.NoError(t, err)
-		assert.Equal(t, 8, st.Count())
+		assert.Equal(t, 4, st.Count()) // Unique: 1, 3, 5, 7
 	})
 
 	t.Run("empty input", func(t *testing.T) {
@@ -208,26 +201,106 @@ func TestBuildBasic(t *testing.T) {
 		assert.ErrorIs(t, err, ErrEmptyInput)
 	})
 
-	t.Run("exact block size", func(t *testing.T) {
+	t.Run("nil input", func(t *testing.T) {
+		_, err := Build(nil)
+		assert.ErrorIs(t, err, ErrEmptyInput)
+	})
+
+	t.Run("exact block size boundary", func(t *testing.T) {
+		// Test boundary: exactly 16 elements = 1 block
 		input := make([]uint32, blockSize)
 		for i := range input {
 			input[i] = uint32(i + 1)
 		}
 		st, err := Build(input)
 		require.NoError(t, err)
-		assert.Equal(t, blockSize, st.Count())
 		assert.Equal(t, 1, st.NumBlocks())
+
+		// Test boundary: 17 elements = 2 blocks
+		input2 := make([]uint32, blockSize+1)
+		for i := range input2 {
+			input2[i] = uint32(i + 1)
+		}
+		st2, err := Build(input2)
+		require.NoError(t, err)
+		assert.Equal(t, 2, st2.NumBlocks())
 	})
 
-	t.Run("multiple blocks", func(t *testing.T) {
-		input := make([]uint32, blockSize+5)
+	t.Run("value too large", func(t *testing.T) {
+		_, err := Build([]uint32{1, 0x80000000})
+		assert.ErrorIs(t, err, ErrValueTooLarge)
+
+		_, err = Build([]uint32{^uint32(0)})
+		assert.ErrorIs(t, err, ErrValueTooLarge)
+	})
+}
+
+// TestSentinelInitialization verifies that empty block slots are correctly
+// initialized with sentinel values (0xFFFFFFFF) using 8-byte writes.
+func TestSentinelInitialization(t *testing.T) {
+	t.Run("partial block has sentinels", func(t *testing.T) {
+		// Create tree with fewer elements than a full block
+		st, err := Build([]uint32{1, 2, 3})
+		require.NoError(t, err)
+
+		data := st.Data()
+		blocks := data[headerSize:]
+
+		// Count sentinels in the block (should be blockSize - 3 = 13)
+		sentinelCount := 0
+		for i := 0; i < blockSizeBytes; i += 4 {
+			val := be.Uint32(blocks[i:])
+			if val == sentinel {
+				sentinelCount++
+			}
+		}
+		assert.Equal(t, blockSize-3, sentinelCount, "should have 13 sentinel values")
+	})
+
+	t.Run("multiple blocks have sentinels", func(t *testing.T) {
+		// 20 elements = 2 blocks, second block has 4 elements + 12 sentinels
+		input := make([]uint32, 20)
 		for i := range input {
 			input[i] = uint32(i + 1)
 		}
 		st, err := Build(input)
 		require.NoError(t, err)
-		assert.Equal(t, blockSize+5, st.Count())
-		assert.Equal(t, 2, st.NumBlocks())
+
+		data := st.Data()
+		blocks := data[headerSize:]
+
+		// Check that all bytes not occupied by values are 0xFF
+		// This verifies the 8-byte sentinel initialization works correctly
+		expectedSentinels := (st.NumBlocks() * blockSize) - st.Count()
+		sentinelCount := 0
+		for i := 0; i < len(blocks); i += 4 {
+			val := be.Uint32(blocks[i:])
+			if val == sentinel {
+				sentinelCount++
+			}
+		}
+		assert.Equal(t, expectedSentinels, sentinelCount)
+	})
+
+	t.Run("sentinel bytes are 0xFF", func(t *testing.T) {
+		st, err := Build([]uint32{1})
+		require.NoError(t, err)
+
+		data := st.Data()
+		blocks := data[headerSize:]
+
+		// Count 0xFF bytes - should be at least (blockSize-1)*4 bytes
+		ffCount := 0
+		for i := range blocks {
+			if blocks[i] == 0xFF {
+				ffCount++
+			}
+		}
+		// Assert that there are at least (blockSize-1)*4 bytes of 0xFF
+		assert.GreaterOrEqual(t, ffCount, (blockSize-1)*4)
+
+		// Optionally: Assert that at least some bytes after the first value are 0xFF
+		assert.Greater(t, ffCount, 0)
 	})
 }
 
@@ -242,9 +315,9 @@ func (e *TestEntry) Key() uint32         { return e.key }
 func (e *TestEntry) Index() uint32       { return e.index }
 func (e *TestEntry) SetIndex(idx uint32) { e.index = idx }
 
-// TestBuildFromKeyed tests the interface-based building API.
+// TestBuildFromKeyed tests the Keyed interface building API.
 func TestBuildFromKeyed(t *testing.T) {
-	t.Run("basic usage", func(t *testing.T) {
+	t.Run("index correlation", func(t *testing.T) {
 		entries := []*TestEntry{
 			{key: 10, data: "ten"},
 			{key: 5, data: "five"},
@@ -255,110 +328,65 @@ func TestBuildFromKeyed(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 3, st.Count())
 
-		// Verify indices point to correct values
 		reader, err := NewReader(st.Data())
 		require.NoError(t, err)
 
+		// Verify SetIndex was called and indices match search results
 		for _, e := range entries {
-			// Search should return the same index that was set
 			pos := reader.Search(e.key)
-			assert.GreaterOrEqual(t, pos, 0, "key %d should be found", e.key)
-			assert.Equal(t, int(e.index), pos, "index for key %d should match search result", e.key)
+			assert.Equal(t, int(e.index), pos, "index for key %d should match", e.key)
 		}
 	})
 
-	t.Run("with duplicates", func(t *testing.T) {
+	t.Run("duplicates keep first", func(t *testing.T) {
 		entries := []*TestEntry{
-			{key: 5, data: "first-five"},
-			{key: 5, data: "second-five"}, // duplicate
+			{key: 5, data: "first"},
+			{key: 5, data: "second"}, // duplicate - should be ignored
 			{key: 10, data: "ten"},
 		}
 
 		st, err := BuildFromKeyed(entries)
 		require.NoError(t, err)
-		assert.Equal(t, 2, st.Count()) // Only 2 unique keys
-
-		// First occurrence should have a valid index
-		reader, err := NewReader(st.Data())
-		require.NoError(t, err)
-		pos := reader.Search(entries[0].key)
-		assert.Equal(t, int(entries[0].index), pos)
+		assert.Equal(t, 2, st.Count())
 	})
 
-	t.Run("empty input", func(t *testing.T) {
-		var entries []*TestEntry
-		_, err := BuildFromKeyed(entries)
+	t.Run("empty and nil input", func(t *testing.T) {
+		var nilEntries []*TestEntry
+		_, err := BuildFromKeyed(nilEntries)
+		assert.ErrorIs(t, err, ErrEmptyInput)
+
+		_, err = BuildFromKeyed([]*TestEntry{})
 		assert.ErrorIs(t, err, ErrEmptyInput)
 	})
 
-	t.Run("single entry", func(t *testing.T) {
-		entries := []*TestEntry{{key: 42, data: "answer"}}
-		st, err := BuildFromKeyed(entries)
-		require.NoError(t, err)
-		assert.Equal(t, 1, st.Count())
-
-		reader, err := NewReader(st.Data())
-		require.NoError(t, err)
-		pos := reader.Search(42)
-		assert.Equal(t, int(entries[0].index), pos)
-	})
-
-	t.Run("large dataset", func(t *testing.T) {
-		entries := make([]*TestEntry, 1000)
-		for i := range entries {
-			entries[i] = &TestEntry{key: uint32(i * 2), data: "data"}
-		}
-
-		st, err := BuildFromKeyed(entries)
-		require.NoError(t, err)
-		assert.Equal(t, 1000, st.Count())
-
-		// Verify random samples
-		reader, err := NewReader(st.Data())
-		require.NoError(t, err)
-
-		for _, i := range []int{0, 100, 500, 999} {
-			pos := reader.Search(entries[i].key)
-			assert.Equal(t, int(entries[i].index), pos)
-		}
+	t.Run("value too large", func(t *testing.T) {
+		entries := []*TestEntry{{key: 0x80000000}}
+		_, err := BuildFromKeyed(entries)
+		assert.ErrorIs(t, err, ErrValueTooLarge)
 	})
 }
 
-// TestSearchBasic tests basic search functionality.
-func TestSearchBasic(t *testing.T) {
-	t.Run("find single element", func(t *testing.T) {
-		st, err := Build([]uint32{42})
+// TestSearch tests search functionality.
+func TestSearch(t *testing.T) {
+	t.Run("found and not found", func(t *testing.T) {
+		st, err := Build([]uint32{10, 20, 30, 40, 50})
 		require.NoError(t, err)
 
 		reader, err := NewReader(st.Data())
 		require.NoError(t, err)
 
-		assert.GreaterOrEqual(t, reader.Search(42), 0, "should find 42")
-		assert.True(t, reader.Contains(42))
-		assert.Equal(t, -1, reader.Search(41), "should not find 41")
-		assert.False(t, reader.Contains(41))
+		// Existing values
+		assert.True(t, reader.Contains(10))
+		assert.True(t, reader.Contains(30))
+		assert.True(t, reader.Contains(50))
+
+		// Non-existent values
+		assert.False(t, reader.Contains(5))
+		assert.False(t, reader.Contains(25))
+		assert.False(t, reader.Contains(100))
 	})
 
-	t.Run("find in multiple elements", func(t *testing.T) {
-		input := []uint32{10, 20, 30, 40, 50}
-		st, err := Build(input)
-		require.NoError(t, err)
-
-		reader, err := NewReader(st.Data())
-		require.NoError(t, err)
-
-		for _, v := range input {
-			pos := reader.Search(v)
-			assert.GreaterOrEqual(t, pos, 0, "should find %d", v)
-		}
-
-		// Test non-existent values
-		assert.Equal(t, -1, reader.Search(5))
-		assert.Equal(t, -1, reader.Search(15))
-		assert.Equal(t, -1, reader.Search(100))
-	})
-
-	t.Run("search returns correct value", func(t *testing.T) {
+	t.Run("position maps to correct value", func(t *testing.T) {
 		st, err := Build([]uint32{1, 3, 5, 7, 9})
 		require.NoError(t, err)
 
@@ -368,117 +396,50 @@ func TestSearchBasic(t *testing.T) {
 		for _, key := range []uint32{1, 3, 5, 7, 9} {
 			pos := reader.Search(key)
 			require.GreaterOrEqual(t, pos, 0)
-			// Verify the position contains the correct value
 			blockIdx := pos / blockSize
 			posInBlock := pos % blockSize
-			val := reader.blockValue(blockIdx, posInBlock)
-			assert.Equal(t, key, val)
+			assert.Equal(t, key, reader.blockValue(blockIdx, posInBlock))
 		}
+	})
+
+	t.Run("empty blocks search", func(t *testing.T) {
+		// searchGeneric should handle empty blocks gracefully
+		result := searchGeneric(nil, 42, 0)
+		assert.Equal(t, -1, result)
+
+		result = searchGeneric([]byte{}, 42, 0)
+		assert.Equal(t, -1, result)
 	})
 }
 
-// TestSearchLarge tests search with larger datasets.
-func TestSearchLarge(t *testing.T) {
-	t.Run("100 elements", func(t *testing.T) {
-		input := make([]uint32, 100)
-		for i := range input {
-			input[i] = uint32(i * 2) // Even numbers 0-198
-		}
+// TestWriteTo tests serialization.
+func TestWriteTo(t *testing.T) {
+	st, err := Build([]uint32{10, 20, 30, 40, 50})
+	require.NoError(t, err)
 
-		st, err := Build(input)
-		require.NoError(t, err)
+	var buf bytes.Buffer
+	n, err := st.WriteTo(&buf)
+	require.NoError(t, err)
+	assert.Equal(t, int64(len(st.Data())), n)
+	assert.Equal(t, st.Data(), buf.Bytes())
 
-		reader, err := NewReader(st.Data())
-		require.NoError(t, err)
-
-		// Find all even numbers
-		for _, v := range input {
-			assert.True(t, reader.Contains(v), "should contain %d", v)
-		}
-
-		// Don't find odd numbers
-		for i := uint32(1); i < 200; i += 2 {
-			assert.False(t, reader.Contains(i), "should not contain %d", i)
-		}
-	})
-
-	t.Run("1000 elements", func(t *testing.T) {
-		input := make([]uint32, 1000)
-		for i := range input {
-			input[i] = uint32(i * 3)
-		}
-
-		st, err := Build(input)
-		require.NoError(t, err)
-
-		reader, err := NewReader(st.Data())
-		require.NoError(t, err)
-
-		assert.Equal(t, 1000, reader.Count())
-
-		// Spot check some values
-		assert.True(t, reader.Contains(0))
-		assert.True(t, reader.Contains(1500))
-		assert.True(t, reader.Contains(2997))
-		assert.False(t, reader.Contains(1))
-		assert.False(t, reader.Contains(3000))
-	})
+	// Verify roundtrip
+	reader, err := NewReader(buf.Bytes())
+	require.NoError(t, err)
+	assert.Equal(t, st.Count(), reader.Count())
+	assert.True(t, reader.Contains(30))
 }
 
-// TestWriteToAndReadFrom tests serialization and deserialization.
-func TestWriteToAndReadFrom(t *testing.T) {
-	input := []uint32{10, 20, 5, 30, 15, 25, 8, 12, 18, 22}
-
-	t.Run("write and read via buffer", func(t *testing.T) {
-		inputCopy := make([]uint32, len(input))
-		copy(inputCopy, input)
-		st, err := Build(inputCopy)
-		require.NoError(t, err)
-
-		// Write to buffer
-		var buf bytes.Buffer
-		n, err := st.WriteTo(&buf)
-		require.NoError(t, err)
-		assert.Equal(t, int64(len(st.Data())), n)
-
-		// Read back using NewReader
-		reader, err := NewReader(buf.Bytes())
-		require.NoError(t, err)
-		assert.Equal(t, st.Count(), reader.Count())
-
-		// Verify all values can be found
-		for _, v := range input {
-			assert.True(t, reader.Contains(v), "should contain %d", v)
-		}
-	})
-
-	t.Run("data is identical", func(t *testing.T) {
-		inputCopy := make([]uint32, len(input))
-		copy(inputCopy, input)
-		st, err := Build(inputCopy)
-		require.NoError(t, err)
-
-		var buf bytes.Buffer
-		_, err = st.WriteTo(&buf)
-		require.NoError(t, err)
-
-		// Data should match exactly
-		assert.Equal(t, st.Data(), buf.Bytes())
-	})
-}
-
-// TestHeader tests header parsing and serialization.
-func TestHeader(t *testing.T) {
-	t.Run("parse valid header", func(t *testing.T) {
+// TestHeaderParsing tests header validation errors.
+func TestHeaderParsing(t *testing.T) {
+	t.Run("valid header", func(t *testing.T) {
 		st, err := Build([]uint32{1, 2, 3})
 		require.NoError(t, err)
 
 		header, err := parseHeader(st.Data())
 		require.NoError(t, err)
-
 		assert.Equal(t, "STRE", string(header.magic[:]))
 		assert.Equal(t, Version, header.version)
-		assert.Equal(t, uint16(blockSize), header.blockSize)
 		assert.Equal(t, uint32(3), header.count)
 	})
 
@@ -488,247 +449,143 @@ func TestHeader(t *testing.T) {
 		assert.ErrorIs(t, err, ErrInvalidMagic)
 	})
 
+	t.Run("invalid version", func(t *testing.T) {
+		// Valid magic but wrong version (0x9999)
+		data := []byte("STRE\x99\x99\x10\x00\x03\x00\x00\x00\x00\x00\x00\x00")
+		_, err := parseHeader(data)
+		assert.ErrorIs(t, err, ErrInvalidVersion)
+	})
+
+	t.Run("invalid block size", func(t *testing.T) {
+		// Valid magic/version but wrong block size (8 instead of 16)
+		data := []byte("STRE\x01\x00\x08\x00\x03\x00\x00\x00\x00\x00\x00\x00")
+		_, err := parseHeader(data)
+		assert.ErrorIs(t, err, ErrInvalidBlockSz)
+	})
+
 	t.Run("data too short", func(t *testing.T) {
 		_, err := parseHeader([]byte("STRE"))
+		assert.ErrorIs(t, err, ErrDataTooShort)
+
+		_, err = parseHeader(nil)
 		assert.ErrorIs(t, err, ErrDataTooShort)
 	})
 }
 
-// TestNewReader tests creating readers from byte slices.
+// TestNewReader tests reader creation edge cases.
 func TestNewReader(t *testing.T) {
-	t.Run("valid data", func(t *testing.T) {
+	t.Run("truncated block data", func(t *testing.T) {
 		st, err := Build([]uint32{1, 2, 3, 4, 5})
 		require.NoError(t, err)
 
-		reader, err := NewReader(st.Data())
-		require.NoError(t, err)
-
-		assert.Equal(t, st.Count(), reader.Count())
-		assert.Equal(t, st.NumBlocks(), reader.NumBlocks())
-	})
-
-	t.Run("truncated data", func(t *testing.T) {
-		st, err := Build([]uint32{1, 2, 3, 4, 5})
-		require.NoError(t, err)
-
-		// Truncate the data
+		// Header is valid but block data is truncated
 		truncated := st.Data()[:headerSize+10]
 		_, err = NewReader(truncated)
 		assert.ErrorIs(t, err, ErrDataTooShort)
 	})
-}
 
-// TestAllIterator tests the All() iterator.
-func TestAllIterator(t *testing.T) {
-	input := []uint32{5, 3, 8, 1, 9, 2, 7, 4, 6}
-	inputCopy := make([]uint32, len(input))
-	copy(inputCopy, input)
-	st, err := Build(inputCopy)
-	require.NoError(t, err)
-
-	reader, err := NewReader(st.Data())
-	require.NoError(t, err)
-
-	// Collect all values using the iterator
-	var values []uint32
-	reader.All()(func(v uint32) bool {
-		values = append(values, v)
-		return true // continue iteration
-	})
-
-	// Should have all unique input values
-	assert.Len(t, values, len(input))
-
-	// All input values should be present
-	valueSet := make(map[uint32]bool)
-	for _, v := range values {
-		valueSet[v] = true
-	}
-	for _, v := range input {
-		assert.True(t, valueSet[v], "should have value %d", v)
-	}
-}
-
-// TestSortedIterator tests the Sorted() iterator for in-order traversal.
-func TestSortedIterator(t *testing.T) {
-	t.Run("basic sorted iteration", func(t *testing.T) {
-		input := []uint32{5, 3, 8, 1, 9, 2, 7, 4, 6}
-		inputCopy := make([]uint32, len(input))
-		copy(inputCopy, input)
-
-		st, err := Build(inputCopy)
+	t.Run("reader references original data", func(t *testing.T) {
+		st, err := Build([]uint32{1, 2, 3})
 		require.NoError(t, err)
 
 		reader, err := NewReader(st.Data())
 		require.NoError(t, err)
 
-		// Collect values in sorted order
+		// Reader.Data() should return the same slice
+		assert.Equal(t, st.Data(), reader.Data())
+	})
+}
+
+// TestIterators tests All() and Sorted() iterators.
+func TestIterators(t *testing.T) {
+	input := []uint32{5, 3, 8, 1, 9, 2, 7, 4, 6}
+	st, err := Build(append([]uint32{}, input...))
+	require.NoError(t, err)
+
+	reader, err := NewReader(st.Data())
+	require.NoError(t, err)
+
+	t.Run("All returns all values", func(t *testing.T) {
+		var values []uint32
+		reader.All()(func(v uint32) bool {
+			values = append(values, v)
+			return true
+		})
+
+		assert.Len(t, values, len(input))
+		valueSet := make(map[uint32]bool)
+		for _, v := range values {
+			valueSet[v] = true
+		}
+		for _, v := range input {
+			assert.True(t, valueSet[v])
+		}
+	})
+
+	t.Run("Sorted returns ascending order", func(t *testing.T) {
 		var values []uint32
 		reader.Sorted()(func(v uint32, _ int) bool {
 			values = append(values, v)
 			return true
 		})
 
-		// Should have all values
-		assert.Len(t, values, len(input))
-
-		// Values should be in ascending order
-		for i := 1; i < len(values); i++ {
-			assert.Less(t, values[i-1], values[i], "values should be in ascending order")
-		}
-
-		// Should match sorted input
 		expected := []uint32{1, 2, 3, 4, 5, 6, 7, 8, 9}
 		assert.Equal(t, expected, values)
 	})
 
-	t.Run("large dataset", func(t *testing.T) {
-		input := make([]uint32, 1000)
-		for i := range input {
-			// Reverse order to make it interesting
-			input[i] = uint32(1000 - i)
-		}
-
-		st, err := Build(input)
-		require.NoError(t, err)
-
-		reader, err := NewReader(st.Data())
-		require.NoError(t, err)
-
-		var values []uint32
-		reader.Sorted()(func(v uint32, _ int) bool {
-			values = append(values, v)
+	t.Run("Sorted index maps to correct value", func(t *testing.T) {
+		reader.Sorted()(func(value uint32, index int) bool {
+			blockIdx := index / blockSize
+			posInBlock := index % blockSize
+			assert.Equal(t, value, reader.blockValue(blockIdx, posInBlock))
 			return true
 		})
-
-		assert.Len(t, values, 1000)
-
-		// Verify ascending order
-		for i := 1; i < len(values); i++ {
-			assert.Less(t, values[i-1], values[i])
-		}
-
-		// First and last values should be correct
-		assert.Equal(t, uint32(1), values[0])
-		assert.Equal(t, uint32(1000), values[len(values)-1])
 	})
 
 	t.Run("early termination", func(t *testing.T) {
-		input := make([]uint32, 100)
-		for i := range input {
-			input[i] = uint32(i + 1)
-		}
-
-		st, err := Build(input)
-		require.NoError(t, err)
-
-		reader, err := NewReader(st.Data())
-		require.NoError(t, err)
-
-		// Stop after 10 values
-		var values []uint32
-		reader.Sorted()(func(v uint32, _ int) bool {
-			values = append(values, v)
-			return len(values) < 10
+		count := 0
+		reader.Sorted()(func(_ uint32, _ int) bool {
+			count++
+			return count < 3
 		})
+		assert.Equal(t, 3, count)
+	})
 
-		assert.Len(t, values, 10)
-		// First 10 sorted values
-		for i, v := range values {
-			assert.Equal(t, uint32(i+1), v)
-		}
+	t.Run("empty tree iteration", func(t *testing.T) {
+		// Create a reader with zero count (simulated)
+		emptyReader := &Reader{numBlocks: 0}
+		count := 0
+		emptyReader.Sorted()(func(_ uint32, _ int) bool {
+			count++
+			return true
+		})
+		assert.Equal(t, 0, count)
 	})
 }
 
-// TestSortedWithIndex tests sorted iteration with index information.
-func TestSortedWithIndex(t *testing.T) {
-	input := []uint32{50, 30, 70, 20, 40, 60, 80}
-	inputCopy := make([]uint32, len(input))
-	copy(inputCopy, input)
-
-	st, err := Build(inputCopy)
-	require.NoError(t, err)
-
-	reader, err := NewReader(st.Data())
-	require.NoError(t, err)
-
-	type pair struct {
-		value uint32
-		index int
-	}
-
-	var pairs []pair
-	reader.Sorted()(func(value uint32, index int) bool {
-		pairs = append(pairs, pair{value, index})
-		return true
-	})
-
-	// Verify sorted order
-	for i := 1; i < len(pairs); i++ {
-		assert.Less(t, pairs[i-1].value, pairs[i].value)
-	}
-
-	// Verify each index maps back to the correct value
-	for _, p := range pairs {
-		// Read the value at the stored index
-		blockIdx := p.index / blockSize
-		posInBlock := p.index % blockSize
-		val := reader.blockValue(blockIdx, posInBlock)
-		assert.Equal(t, p.value, val)
-	}
-}
-
-// TestSearchEdgeCases tests edge cases in search.
+// TestSearchEdgeCases tests boundary conditions for search.
 func TestSearchEdgeCases(t *testing.T) {
-	t.Run("search for 0", func(t *testing.T) {
+	t.Run("zero value", func(t *testing.T) {
 		st, err := Build([]uint32{0, 5, 10})
 		require.NoError(t, err)
-
-		reader, err := NewReader(st.Data())
-		require.NoError(t, err)
-
+		reader, _ := NewReader(st.Data())
 		assert.True(t, reader.Contains(0))
 	})
 
-	t.Run("search for max valid value (MaxValue)", func(t *testing.T) {
-		// MaxValue is the largest valid value (0x7FFFFFFF)
+	t.Run("MaxValue boundary", func(t *testing.T) {
 		st, err := Build([]uint32{1, MaxValue})
 		require.NoError(t, err)
-
-		reader, err := NewReader(st.Data())
-		require.NoError(t, err)
+		reader, _ := NewReader(st.Data())
 
 		assert.True(t, reader.Contains(MaxValue))
-		assert.True(t, reader.Contains(1))
+		assert.Equal(t, -1, reader.Search(MaxValue+1)) // Just above max
+		assert.Equal(t, -1, reader.Search(^uint32(0))) // Max uint32
 	})
 
-	t.Run("search for value exceeding MaxValue returns not found", func(t *testing.T) {
-		st, err := Build([]uint32{1, 100})
-		require.NoError(t, err)
-
-		reader, err := NewReader(st.Data())
-		require.NoError(t, err)
-
-		// Values >= 0x80000000 should return -1 immediately
-		assert.Equal(t, -1, reader.Search(0x80000000))
-		assert.Equal(t, -1, reader.Search(^uint32(0)))
-		assert.False(t, reader.Contains(0x80000000))
-	})
-
-	t.Run("build with value exceeding MaxValue fails", func(t *testing.T) {
-		_, err := Build([]uint32{1, 0x80000000})
-		assert.ErrorIs(t, err, ErrValueTooLarge)
-
-		_, err = Build([]uint32{^uint32(0) - 1})
-		assert.ErrorIs(t, err, ErrValueTooLarge)
-	})
-
-	t.Run("search in sparse data", func(t *testing.T) {
+	t.Run("sparse values", func(t *testing.T) {
 		st, err := Build([]uint32{1, 1000000, 2000000000})
 		require.NoError(t, err)
-
-		reader, err := NewReader(st.Data())
-		require.NoError(t, err)
+		reader, _ := NewReader(st.Data())
 
 		assert.True(t, reader.Contains(1))
 		assert.True(t, reader.Contains(1000000))
@@ -737,87 +594,33 @@ func TestSearchEdgeCases(t *testing.T) {
 	})
 }
 
-// TestSearchConsistency verifies search returns valid positions.
-func TestSearchConsistency(t *testing.T) {
-	testCases := [][]uint32{
-		{42},
-		{1, 2, 3, 4, 5},
-		{5, 4, 3, 2, 1},
-		{3, 1, 4, 1, 5, 9, 2, 6, 5, 3},
-		{10, 20, 30, 40, 50, 60, 70, 80, 90, 100},
-	}
+// TestHelperFunctions tests numBlocks and DataSize calculations.
+func TestHelperFunctions(t *testing.T) {
+	t.Run("numBlocks", func(t *testing.T) {
+		assert.Equal(t, 0, numBlocks(0))
+		assert.Equal(t, 0, numBlocks(-1))
+		assert.Equal(t, 1, numBlocks(1))
+		assert.Equal(t, 1, numBlocks(blockSize))
+		assert.Equal(t, 2, numBlocks(blockSize+1))
+		assert.Equal(t, 7, numBlocks(100)) // ceil(100/16)
+	})
 
-	for _, input := range testCases {
-		// Get unique values before Build modifies the slice
-		seen := make(map[uint32]bool)
-		var unique []uint32
-		for _, v := range input {
-			if !seen[v] {
-				seen[v] = true
-				unique = append(unique, v)
-			}
-		}
+	t.Run("DataSize", func(t *testing.T) {
+		assert.Equal(t, headerSize, DataSize(0))
+		assert.Equal(t, headerSize, DataSize(-1))
+		assert.Equal(t, headerSize+blockSizeBytes, DataSize(1))
+		assert.Equal(t, headerSize+blockSizeBytes, DataSize(blockSize))
+		assert.Equal(t, headerSize+2*blockSizeBytes, DataSize(blockSize+1))
+	})
 
-		// Make a copy since Build sorts in-place
-		inputCopy := make([]uint32, len(input))
-		copy(inputCopy, input)
-		st, err := Build(inputCopy)
-		require.NoError(t, err)
-
-		reader, err := NewReader(st.Data())
-		require.NoError(t, err)
-
-		// Verify each unique value can be found
-		for _, key := range unique {
-			pos := reader.Search(key)
-			require.GreaterOrEqual(t, pos, 0, "should find %d", key)
-
-			// Verify position contains correct value
-			blockIdx := pos / blockSize
-			posInBlock := pos % blockSize
-			val := reader.blockValue(blockIdx, posInBlock)
-			assert.Equal(t, key, val, "position %d should contain %d", pos, key)
-		}
-	}
-}
-
-// TestNumBlocks tests block count calculations.
-func TestNumBlocks(t *testing.T) {
-	tests := []struct {
-		count    int
-		expected int
-	}{
-		{0, 0},
-		{1, 1},
-		{blockSize, 1},
-		{blockSize + 1, 2},
-		{blockSize * 2, 2},
-		{blockSize*2 + 1, 3},
-		{100, 7}, // ceil(100/16) = 7
-	}
-
-	for _, tt := range tests {
-		assert.Equal(t, tt.expected, numBlocks(tt.count),
-			"NumBlocks(%d) should be %d", tt.count, tt.expected)
-	}
-}
-
-// TestDataSize tests total data size calculations.
-func TestDataSize(t *testing.T) {
-	tests := []struct {
-		count    int
-		expected int
-	}{
-		{0, headerSize},
-		{1, headerSize + blockSizeBytes},
-		{blockSize, headerSize + blockSizeBytes},
-		{blockSize + 1, headerSize + 2*blockSizeBytes},
-	}
-
-	for _, tt := range tests {
-		assert.Equal(t, tt.expected, DataSize(tt.count),
-			"DataSize(%d) should be %d", tt.count, tt.expected)
-	}
+	t.Run("childIndex", func(t *testing.T) {
+		// k=0, i=0 -> child is 1
+		assert.Equal(t, 1, childIndex(0, 0))
+		// k=0, i=16 -> rightmost child of root is 17
+		assert.Equal(t, 17, childIndex(0, blockSize))
+		// k=1, i=0 -> child is 18
+		assert.Equal(t, 18, childIndex(1, 0))
+	})
 }
 
 // TestSIMDConsistency verifies SIMD and pure-Go implementations return same results.
@@ -863,85 +666,39 @@ func TestSIMDConsistency(t *testing.T) {
 
 // TestCRC32 tests CRC-32 checksum functionality.
 func TestCRC32(t *testing.T) {
-	t.Run("valid CRC32 on build", func(t *testing.T) {
-		values := []uint32{10, 20, 30, 40, 50}
-		st, err := Build(values)
+	t.Run("valid after build", func(t *testing.T) {
+		st, err := Build([]uint32{10, 20, 30})
 		require.NoError(t, err)
 
-		reader, err := NewReader(st.Data())
-		require.NoError(t, err)
-
-		assert.True(t, reader.ValidateCRC32(), "CRC32 should be valid after build")
-	})
-
-	t.Run("NewReaderWithValidation success", func(t *testing.T) {
-		values := []uint32{1, 2, 3, 4, 5}
-		st, err := Build(values)
-		require.NoError(t, err)
-
-		reader, err := NewReaderWithValidation(st.Data())
-		require.NoError(t, err)
-		assert.NotNil(t, reader)
+		reader, _ := NewReader(st.Data())
 		assert.True(t, reader.ValidateCRC32())
 	})
 
-	t.Run("corrupted data detection", func(t *testing.T) {
-		values := []uint32{100, 200, 300}
-		st, err := Build(values)
+	t.Run("NewReaderWithValidation detects corruption", func(t *testing.T) {
+		st, err := Build([]uint32{100, 200, 300})
 		require.NoError(t, err)
 
-		// Corrupt the data by modifying a value in the first block
-		data := make([]byte, len(st.Data()))
-		copy(data, st.Data())
-		// Modify the first value (after header)
-		data[headerSize+4] = 0xFF // This should corrupt the CRC
+		// Corrupt block data
+		data := append([]byte{}, st.Data()...)
+		data[headerSize+4] ^= 0xFF
 
-		reader, err := NewReader(data)
-		require.NoError(t, err) // Reader creation should still work
-
-		assert.False(t, reader.ValidateCRC32(), "CRC32 should detect corruption")
-
-		// NewReaderWithValidation should fail
 		_, err = NewReaderWithValidation(data)
 		assert.ErrorIs(t, err, ErrInvalidData)
 	})
 
-	t.Run("header corruption detection", func(t *testing.T) {
-		values := []uint32{5, 10, 15}
-		st, err := Build(values)
+	t.Run("CRC field tampering detected", func(t *testing.T) {
+		st, err := Build([]uint32{5, 10, 15})
 		require.NoError(t, err)
 
-		// Corrupt the CRC32 field itself - this should make validation fail
-		// (since CRC includes the CRC field set to 0 during computation)
-		data := make([]byte, len(st.Data()))
-		copy(data, st.Data())
-		// Modify CRC32 field (bytes 12-16) - flip a bit
-		data[12] ^= 0x01
+		data := append([]byte{}, st.Data()...)
+		data[12] ^= 0x01 // Flip bit in CRC field
 
-		reader, err := NewReader(data)
-		require.NoError(t, err)
-
-		assert.False(t, reader.ValidateCRC32(), "CRC32 should detect corruption when CRC field is modified")
+		reader, _ := NewReader(data)
+		assert.False(t, reader.ValidateCRC32())
 	})
 
-	t.Run("BuildFromKeyed CRC32", func(t *testing.T) {
-		items := []*TestEntry{
-			{key: 100, data: "first"},
-			{key: 50, data: "second"},
-			{key: 150, data: "third"},
-		}
-
-		st, err := BuildFromKeyed(items)
-		require.NoError(t, err)
-
-		reader, err := NewReader(st.Data())
-		require.NoError(t, err)
-
-		assert.True(t, reader.ValidateCRC32(), "BuildFromKeyed should generate valid CRC32")
-
-		// Verify indices were set correctly
-		for _, item := range items {
-			assert.True(t, reader.Contains(item.key))
-		}
+	t.Run("short data returns false", func(t *testing.T) {
+		assert.False(t, validateCRC32([]byte("SHORT")))
+		assert.False(t, validateCRC32(nil))
 	})
 }

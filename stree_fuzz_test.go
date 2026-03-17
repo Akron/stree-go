@@ -5,22 +5,18 @@ import (
 )
 
 // FuzzBuildAndSearch tests that all inserted keys can be found.
-// Note: Values are limited to < 0x80000000 because SIMD comparison uses signed
-// arithmetic. Values >= 0x80000000 may cause incorrect results with SIMD search.
 func FuzzBuildAndSearch(f *testing.F) {
-	// Add seed corpus
 	f.Add([]byte{1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0})
-	f.Add([]byte{255, 255, 255, 127}) // Max valid value for SIMD (0x7FFFFFFF)
+	f.Add([]byte{254, 255, 255, 255}) // MaxValue (0xFFFFFFFE)
+	f.Add([]byte{0, 0, 0, 128})       // 0x80000000 (valid in v2)
 	f.Add([]byte{0, 0, 0, 0})         // Zero
 	f.Add([]byte{42, 0, 0, 0})        // Single value
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		// Convert bytes to uint32 slice
 		if len(data) < 4 || len(data)%4 != 0 {
 			return
 		}
 
-		// Collect unique values before Build modifies the slice
 		uniqueValues := make(map[uint32]bool)
 		values := make([]uint32, len(data)/4)
 		for i := range values {
@@ -29,18 +25,18 @@ func FuzzBuildAndSearch(f *testing.F) {
 				uint32(data[i*4+2])<<16 |
 				uint32(data[i*4+3])<<24
 
-			// Limit to values < 0x80000000 for correct SIMD comparison
-			// and avoid sentinel value
-			values[i] = values[i] & 0x7FFFFFFF
+			if values[i] == sentinel {
+				values[i] = MaxValue
+			}
 			if values[i] == 0 && i > 0 {
-				values[i] = 1 // Avoid too many zeros
+				values[i] = 1
 			}
 			uniqueValues[values[i]] = true
 		}
 
 		tree, err := Build(values)
 		if err != nil {
-			return // Empty input is expected
+			return
 		}
 
 		reader, err := NewReader(tree.Data())
@@ -48,14 +44,12 @@ func FuzzBuildAndSearch(f *testing.F) {
 			t.Fatalf("Failed to create reader: %v", err)
 		}
 
-		// Verify all unique values can be found
 		for v := range uniqueValues {
 			if !reader.Contains(v) {
 				t.Errorf("Value %d not found in tree", v)
 			}
 		}
 
-		// Verify count matches unique values
 		if reader.Count() != len(uniqueValues) {
 			t.Errorf("Count mismatch: got %d, want %d", reader.Count(), len(uniqueValues))
 		}
@@ -72,7 +66,6 @@ func FuzzBuildFromKeyed(f *testing.F) {
 			return
 		}
 
-		// Create keyed entries
 		entries := make([]*fuzzEntry, len(data)/4)
 		for i := range entries {
 			key := uint32(data[i*4]) |
@@ -80,8 +73,9 @@ func FuzzBuildFromKeyed(f *testing.F) {
 				uint32(data[i*4+2])<<16 |
 				uint32(data[i*4+3])<<24
 
-			// Limit to values < 0x80000000 for correct SIMD comparison
-			key = key & 0x7FFFFFFF
+			if key == sentinel {
+				key = MaxValue
+			}
 			if key == 0 && i > 0 {
 				key = uint32(i)
 			}
@@ -98,13 +92,11 @@ func FuzzBuildFromKeyed(f *testing.F) {
 			t.Fatalf("Failed to create reader: %v", err)
 		}
 
-		// Verify all entries have valid indices set
 		for _, e := range entries {
 			if e.index > uint32(reader.Count()*blockSize) {
 				t.Errorf("Entry index %d out of bounds", e.index)
 			}
 
-			// Verify the key can be found
 			pos := reader.Search(e.key)
 			if pos < 0 {
 				t.Errorf("Key %d not found", e.key)
@@ -114,19 +106,20 @@ func FuzzBuildFromKeyed(f *testing.F) {
 }
 
 // FuzzSIMDConsistency verifies SIMD and pure-Go return same results.
-// Values are limited to < 0x80000000 for correct SIMD comparison.
 func FuzzSIMDConsistency(f *testing.F) {
 	f.Add([]byte{1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0}, uint32(2))
 	f.Add([]byte{10, 0, 0, 0, 20, 0, 0, 0}, uint32(15))
 	f.Add([]byte{100, 0, 0, 0}, uint32(100))
+	f.Add([]byte{0, 0, 0, 128}, uint32(0x80000000)) // High uint32
 
 	f.Fuzz(func(t *testing.T, data []byte, searchKey uint32) {
 		if len(data) < 4 || len(data)%4 != 0 {
 			return
 		}
 
-		// Limit search key to valid range
-		searchKey = searchKey & 0x7FFFFFFF
+		if searchKey == sentinel {
+			searchKey = MaxValue
+		}
 
 		values := make([]uint32, len(data)/4)
 		for i := range values {
@@ -135,8 +128,9 @@ func FuzzSIMDConsistency(f *testing.F) {
 				uint32(data[i*4+2])<<16 |
 				uint32(data[i*4+3])<<24
 
-			// Limit to values < 0x80000000
-			values[i] = values[i] & 0x7FFFFFFF
+			if values[i] == sentinel {
+				values[i] = MaxValue
+			}
 		}
 
 		tree, err := Build(values)
@@ -152,7 +146,6 @@ func FuzzSIMDConsistency(f *testing.F) {
 		blocks := reader.Data()[headerSize:]
 		numBlocks := reader.NumBlocks()
 
-		// Compare SIMD and generic results
 		genericResult := SearchGeneric(blocks, searchKey, numBlocks)
 		simdResult := search(blocks, searchKey, numBlocks)
 
@@ -179,8 +172,9 @@ func FuzzSortedIteration(f *testing.F) {
 				uint32(data[i*4+2])<<16 |
 				uint32(data[i*4+3])<<24
 
-			// Limit to values < 0x80000000
-			values[i] = values[i] & 0x7FFFFFFF
+			if values[i] == sentinel {
+				values[i] = MaxValue
+			}
 		}
 
 		tree, err := Build(values)
@@ -193,14 +187,12 @@ func FuzzSortedIteration(f *testing.F) {
 			t.Fatalf("Failed to create reader: %v", err)
 		}
 
-		// Collect values in sorted order
 		var sorted []uint32
 		reader.Sorted()(func(v uint32, _ int) bool {
 			sorted = append(sorted, v)
 			return true
 		})
 
-		// Verify ascending order
 		for i := 1; i < len(sorted); i++ {
 			if sorted[i-1] >= sorted[i] {
 				t.Errorf("Not sorted: %d >= %d at positions %d, %d", sorted[i-1], sorted[i], i-1, i)

@@ -5,6 +5,84 @@ import (
 	"testing"
 )
 
+var (
+	benchPos int
+)
+
+// benchmarkTree holds prebuilt benchmark fixtures for search tests.
+type benchmarkTree struct {
+	blocks    []byte
+	numBlocks int
+}
+
+// buildBenchmarkTree constructs a reader fixture for benchmark size.
+func buildBenchmarkTree(b *testing.B, size int) benchmarkTree {
+	b.Helper()
+	input := make([]uint32, size)
+	for i := range input {
+		input[i] = uint32(i * 2)
+	}
+	st, err := Build(input)
+	if err != nil {
+		b.Fatal(err)
+	}
+	reader, err := NewReader(st.Data())
+	if err != nil {
+		b.Fatal(err)
+	}
+	return benchmarkTree{
+		blocks:    reader.Data()[headerSize:],
+		numBlocks: reader.NumBlocks(),
+	}
+}
+
+// runSearchBench runs one search implementation on deterministic keys.
+func runSearchBench(
+	b *testing.B,
+	blocks []byte,
+	numBlocks int,
+	keys []uint32,
+	searchFn func([]byte, uint32, int) int,
+) {
+	b.Helper()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchPos = searchFn(blocks, keys[i%len(keys)], numBlocks)
+	}
+}
+
+type keyPattern struct {
+	name string
+	keys []uint32
+}
+
+// buildKeyPatterns creates deterministic key sets for stable benchmarks.
+func buildKeyPatterns(size int) []keyPattern {
+	patterns := []keyPattern{
+		{name: "Hit", keys: []uint32{uint32(size)}},
+		{name: "Miss", keys: []uint32{uint32(size + 1)}},
+	}
+
+	sequentialHits := make([]uint32, 512)
+	alternating := make([]uint32, 512)
+	for i := range sequentialHits {
+		v := uint32((i % size) * 2)
+		sequentialHits[i] = v
+		if i%2 == 0 {
+			alternating[i] = v
+		} else {
+			alternating[i] = v + 1
+		}
+	}
+	patterns = append(patterns,
+		keyPattern{name: "SequentialHit", keys: sequentialHits},
+		keyPattern{name: "AlternatingHitMiss", keys: alternating},
+	)
+
+	return patterns
+}
+
 // BenchmarkSearch benchmarks search performance across different tree sizes.
 func BenchmarkSearch(b *testing.B) {
 	sizes := []int{100, 1000, 10000, 100000}
@@ -255,50 +333,36 @@ func BenchmarkContains(b *testing.B) {
 	})
 }
 
-// BenchmarkSearchImplementations compares Generic, SSE, and AVX2 search implementations.
+// BenchmarkSearchImplementations compares Generic, SSE2, AVX2, and AVX-512 search.
 func BenchmarkSearchImplementations(b *testing.B) {
-	sizes := []int{1000, 10000, 100000}
+	sizes := []int{1000, 4000, 8000, 10000, 12000, 16000, 32000, 100000, 500000, 1000000}
+
+	type impl struct {
+		name  string
+		avail func() bool
+		fn    func([]byte, uint32, int) int
+	}
+	implementations := []impl{
+		{name: "Generic", avail: func() bool { return true }, fn: SearchGeneric},
+		{name: "SSE2", avail: HasSSE2, fn: SearchSSE2},
+		{name: "AVX2", avail: HasAVX2, fn: SearchAVX2},
+		{name: "AVX512", avail: HasAVX512, fn: SearchAVX512},
+	}
 
 	for _, size := range sizes {
-		input := make([]uint32, size)
-		for i := range input {
-			input[i] = uint32(i * 2)
-		}
+		tree := buildBenchmarkTree(b, size)
+		patterns := buildKeyPatterns(size)
 
-		st, err := Build(input)
-		if err != nil {
-			b.Fatal(err)
-		}
-
-		reader, err := NewReader(st.Data())
-		if err != nil {
-			b.Fatal(err)
-		}
-
-		blocks := reader.Data()[headerSize:]
-		numBlocks := reader.NumBlocks()
-		searchKey := uint32(size)
-
-		b.Run(fmt.Sprintf("Generic/n=%d", size), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				SearchGeneric(blocks, searchKey, numBlocks)
+		for _, implementation := range implementations {
+			if !implementation.avail() {
+				continue
 			}
-		})
-
-		if HasSSE42() {
-			b.Run(fmt.Sprintf("SSE/n=%d", size), func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					SearchSSE(blocks, searchKey, numBlocks)
-				}
-			})
-		}
-
-		if HasAVX2() {
-			b.Run(fmt.Sprintf("AVX2/n=%d", size), func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					SearchAVX2(blocks, searchKey, numBlocks)
-				}
-			})
+			for _, pattern := range patterns {
+				benchName := fmt.Sprintf("%s/%s/n=%d", implementation.name, pattern.name, size)
+				b.Run(benchName, func(b *testing.B) {
+					runSearchBench(b, tree.blocks, tree.numBlocks, pattern.keys, implementation.fn)
+				})
+			}
 		}
 	}
 }

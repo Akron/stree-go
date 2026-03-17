@@ -226,11 +226,21 @@ func TestBuild(t *testing.T) {
 		assert.Equal(t, 2, st2.NumBlocks())
 	})
 
-	t.Run("value too large", func(t *testing.T) {
-		_, err := Build([]uint32{1, 0x80000000})
+	t.Run("high uint32 values succeed", func(t *testing.T) {
+		st, err := Build([]uint32{1, 0x80000000})
+		require.NoError(t, err)
+		assert.Equal(t, 2, st.Count())
+
+		st, err = Build([]uint32{0xFFFFFFFE})
+		require.NoError(t, err)
+		assert.Equal(t, 1, st.Count())
+	})
+
+	t.Run("sentinel value rejected", func(t *testing.T) {
+		_, err := Build([]uint32{^uint32(0)})
 		assert.ErrorIs(t, err, ErrValueTooLarge)
 
-		_, err = Build([]uint32{^uint32(0)})
+		_, err = Build([]uint32{1, 0xFFFFFFFF})
 		assert.ErrorIs(t, err, ErrValueTooLarge)
 	})
 }
@@ -359,8 +369,15 @@ func TestBuildFromKeyed(t *testing.T) {
 		assert.ErrorIs(t, err, ErrEmptyInput)
 	})
 
-	t.Run("value too large", func(t *testing.T) {
+	t.Run("high uint32 key succeeds", func(t *testing.T) {
 		entries := []*TestEntry{{key: 0x80000000}}
+		st, err := BuildFromKeyed(entries)
+		require.NoError(t, err)
+		assert.Equal(t, 1, st.Count())
+	})
+
+	t.Run("sentinel key rejected", func(t *testing.T) {
+		entries := []*TestEntry{{key: 0xFFFFFFFF}}
 		_, err := BuildFromKeyed(entries)
 		assert.ErrorIs(t, err, ErrValueTooLarge)
 	})
@@ -450,10 +467,16 @@ func TestHeaderParsing(t *testing.T) {
 	})
 
 	t.Run("invalid version", func(t *testing.T) {
-		// Valid magic but wrong version (0x9999)
 		data := []byte("STRE\x99\x99\x10\x00\x03\x00\x00\x00\x00\x00\x00\x00")
 		_, err := parseHeader(data)
 		assert.ErrorIs(t, err, ErrInvalidVersion)
+	})
+
+	t.Run("v1 version accepted", func(t *testing.T) {
+		data := []byte("STRE\x01\x00\x10\x00\x03\x00\x00\x00\x00\x00\x00\x00")
+		h, err := parseHeader(data)
+		require.NoError(t, err)
+		assert.Equal(t, uint16(0x0001), h.version)
 	})
 
 	t.Run("invalid block size", func(t *testing.T) {
@@ -578,8 +601,20 @@ func TestSearchEdgeCases(t *testing.T) {
 		reader, _ := NewReader(st.Data())
 
 		assert.True(t, reader.Contains(MaxValue))
-		assert.Equal(t, -1, reader.Search(MaxValue+1)) // Just above max
-		assert.Equal(t, -1, reader.Search(^uint32(0))) // Max uint32
+		assert.Equal(t, -1, reader.Search(MaxValue+1)) // Sentinel
+		assert.Equal(t, -1, reader.Search(^uint32(0))) // Same as sentinel
+	})
+
+	t.Run("high uint32 values in search", func(t *testing.T) {
+		st, err := Build([]uint32{0x80000000, 0x90000000, 0xFFFFFFFE})
+		require.NoError(t, err)
+		reader, _ := NewReader(st.Data())
+
+		assert.True(t, reader.Contains(0x80000000))
+		assert.True(t, reader.Contains(0x90000000))
+		assert.True(t, reader.Contains(0xFFFFFFFE))
+		assert.False(t, reader.Contains(0x80000001))
+		assert.Equal(t, -1, reader.Search(0xFFFFFFFF))
 	})
 
 	t.Run("sparse values", func(t *testing.T) {
@@ -621,6 +656,27 @@ func TestHelperFunctions(t *testing.T) {
 		// k=1, i=0 -> child is 18
 		assert.Equal(t, 18, childIndex(1, 0))
 	})
+}
+
+// TestReaderSize verifies the Size() method returns the correct data length.
+func TestReaderSize(t *testing.T) {
+	st, err := Build([]uint32{1, 2, 3, 4, 5})
+	require.NoError(t, err)
+
+	reader, err := NewReader(st.Data())
+	require.NoError(t, err)
+
+	assert.Equal(t, len(st.Data()), reader.Size())
+}
+
+// TestVersionV2 verifies the builder writes Version 0x0002.
+func TestVersionV2(t *testing.T) {
+	st, err := Build([]uint32{1, 2, 3})
+	require.NoError(t, err)
+
+	h, err := parseHeader(st.Data())
+	require.NoError(t, err)
+	assert.Equal(t, uint16(0x0002), h.version)
 }
 
 // TestSIMDConsistency verifies SIMD and pure-Go implementations return same results.

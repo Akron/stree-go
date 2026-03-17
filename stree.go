@@ -28,16 +28,18 @@ const (
 	Magic = "STRE"
 
 	// Version is the current format version.
-	Version uint16 = 0x0001
+	Version uint16 = 0x0002
+
+	// versionV1 is the legacy v1 format version, accepted for backward compatibility.
+	versionV1 uint16 = 0x0001
 
 	// sentinel is the value used to mark empty slots in a block.
 	// Using max uint32 ensures it sorts last and is easily detectable.
 	sentinel = ^uint32(0) // 0xFFFFFFFF
 
-	// MaxValue is the maximum allowed value for keys (2^31 - 1).
-	// Values must be < 0x80000000 because SIMD comparison uses signed arithmetic.
-	// This ensures consistent behavior between pure Go and SIMD implementations.
-	MaxValue = uint32(0x7FFFFFFF)
+	// MaxValue is the maximum allowed value for keys.
+	// All uint32 values except the sentinel (0xFFFFFFFF) are valid.
+	MaxValue = uint32(0xFFFFFFFE)
 )
 
 // Errors returned by S-Tree operations.
@@ -48,7 +50,7 @@ var (
 	ErrInvalidData    = errors.New("stree: invalid data")
 	ErrDataTooShort   = errors.New("stree: data too short")
 	ErrInvalidBlockSz = errors.New("stree: invalid block size")
-	ErrValueTooLarge  = errors.New("stree: value exceeds maximum (must be < 0x80000000)")
+	ErrValueTooLarge  = errors.New("stree: value exceeds maximum (must be < 0xFFFFFFFF)")
 )
 
 // header represents the S-Tree file header.
@@ -80,8 +82,8 @@ func parseHeader(data []byte) (*header, error) {
 		return nil, ErrInvalidMagic
 	}
 
-	// Validate version
-	if h.version != Version {
+	// Validate version (accept both v1 and v2)
+	if h.version != Version && h.version != versionV1 {
 		return nil, ErrInvalidVersion
 	}
 

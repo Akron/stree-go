@@ -1,25 +1,20 @@
-//go:build !amd64 || noasm
+//go:build !goexperiment.simd || !amd64
 
 package stree
 
-func init() {
-	initSIMDSelection()
-}
+// HasSSE2 returns true if SSE2 SIMD search is available.
+func HasSSE2() bool { return false }
 
-func initSIMDSelection() {
-	// No SIMD available on this platform
-	// search remains as searchGeneric (set in search_generic.go)
-}
-
-// HasSSE42 returns true if SSE4.2 is available (always false on non-amd64).
-func HasSSE42() bool { return false }
-
-// HasAVX2 returns true if AVX2 is available (always false on non-amd64).
+// HasAVX2 returns true if AVX2 SIMD search is available.
 func HasAVX2() bool { return false }
 
-// Stubs for non-SIMD platforms - fall back to generic
+// HasAVX512 returns true if AVX-512 SIMD search is available.
+func HasAVX512() bool { return false }
+
+// Exported search function variables for benchmarking.
 var (
+	SearchSSE2    = searchGeneric
 	SearchAVX2    = searchGeneric
-	SearchSSE     = searchGeneric
+	SearchAVX512  = searchGeneric
 	SearchGeneric = searchGeneric
 )

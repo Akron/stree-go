@@ -2,11 +2,13 @@
 
 A static B-tree implementation in Go based on the algorithm described
 at [Algorithmica - S-Tree](https://en.algorithmica.org/hpc/data-structures/s-tree/)
-with SIMD acceleration (SSE4.2 and AVX2).
+with SIMD acceleration (SSE2, AVX2, and AVX-512 via Go 1.26+ experimental `archsimd`).
 
 **This is early work and may change without warning!**
 
-STree-Go is designed for high-performance, cache-efficient lookups. It uses Eytzinger (B-tree) numeration with 16-element blocks that align with typical 64-byte CPU cache lines, maximizing cache utilization during tree traversal. On amd64 platforms, the library automatically detects and uses SSE4.2 or AVX2 SIMD instructions at runtime for accelerated search operations, while providing a pure Go fallback that works on all platforms without SIMD support.
+S-Tree is designed for high-performance, cache-efficient lookups. It uses Eytzinger (B-tree) numeration with 16-element blocks that align with typical 64-byte CPU cache lines, maximizing cache utilization during tree traversal. On amd64 platforms with `GOEXPERIMENT=simd`, the library automatically detects and uses SSE2, AVX2, or AVX-512 SIMD instructions at runtime for accelerated search operations, while providing a pure Go fallback that works on all platforms without SIMD support.
+
+Keys can be any uint32 value in the range `[0, 0xFFFFFFFE]` (the value `0xFFFFFFFF` is reserved as a sentinel).
 
 The data structure is designed to work directly with memory-mapped byte slices, making it ideal for persistent, disk-backed indices. Search operations allocate no memory, ensuring predictable performance without GC pressure. Once built, the tree structure is immutable, making it safe for concurrent read access.
 
@@ -21,7 +23,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Akron/stree-go"
+	stree "github.com/Akron/stree-go/v2"
 )
 
 func main() {
@@ -72,35 +74,46 @@ func main() {
 			fmt.Printf("Key %d not found\n", key)
 		}
 	}
-	}
+}
 ```
 
-## Development
+## Building with SIMD
 
-Assembly is generated using [avo](https://github.com/mmcloughlin/avo). Regeneration is done using
+SIMD acceleration requires Go 1.26+ and (for the moment) `GOEXPERIMENT=simd`:
 
 ```shell
-$ go generate ./internal/asm
+# Build with SIMD support
+GOEXPERIMENT=simd go build ./...
+
+# Test with SIMD
+GOEXPERIMENT=simd go test -v ./...
+
+# Test without SIMD (pure Go fallback)
+go test -v ./...
+
+# Benchmarks with SIMD
+GOEXPERIMENT=simd go test -bench=BenchmarkSearchImplementations -benchmem ./...
 ```
 
 ## Performance
 
-Typical benchmark results on Intel Core Ultra 5 125H:
+Benchmark results on Intel Core Ultra 5 125H (GOEXPERIMENT=simd):
 
-| Operation | Size    | Generic | SSE4.2 | AVX2  |
-|-----------|---------|---------|--------|-------|
-| Search    | 1,000   | 25 ns   | 11 ns  | 8 ns  |
-| Search    | 10,000  | 16 ns   | 13 ns  | 11 ns |
-| Search    | 100,000 | 59 ns   | 20 ns  | 13 ns |
+| Operation | Size      | Generic | SSE2    | AVX2    |
+|-----------|-----------|---------|---------|---------|
+| Search    | 1,000     | 16.4 ns | 8.9 ns  | 7.2 ns  |
+| Search    | 10,000    | 11.8 ns | 9.2 ns  | 10.3 ns |
+| Search    | 100,000   | 36.1 ns | 16.2 ns | 12.4 ns |
+| Search    | 1,000,000 | 36.4 ns | 17.5 ns | 13.4 ns |
 
 ## Limitations
 
-- Values must be (uint31): All keys must be in the range [0, 2^31 - 1]. This restriction is enforced at build time and search time. `Build()` and `BuildFromKeyed()` will return `ErrValueTooLarge` if any value exceeds this limit. `Search()` returns -1 immediately for keys >= 0x80000000. This constraint ensures consistent behavior between pure Go and SIMD implementations, as SIMD comparison uses signed arithmetic.
+- The value `0xFFFFFFFF` is reserved as a sentinel. `Build()` and `BuildFromKeyed()` return `ErrValueTooLarge` for sentinel values. `Search()` returns -1 for `0xFFFFFFFF`.
 - In-place modification: `Build()` and `BuildFromKeyed()` sort the input slice in place.
 
 ## Disclaimer
 
-This library was developed with AI assistance (Claude Opus 4.5).
+This library was developed with AI assistance (Claude Opus 4.5 + 4.6).
 
 ## Copyright
 

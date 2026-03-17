@@ -13,8 +13,12 @@ doc: |
   
   The structure is designed for:
   - Memory-mapped access (mmap)
-  - SIMD-accelerated search (SSE4.2 / AVX2)
+  - SIMD-accelerated search (SSE2 / AVX2 / AVX-512)
   - Cache-friendly traversal (64-byte blocks = cache line)
+  
+  Format versions:
+  - 0x0001 (v1): Keys limited to uint31 range [0, 0x7FFFFFFF]
+  - 0x0002 (v2): Keys use full uint32 range [0, 0xFFFFFFFE]
 
 seq:
   - id: header
@@ -36,7 +40,7 @@ types:
         doc: Magic bytes identifying this as an S-Tree file
       - id: version
         type: u2
-        doc: Format version (currently 0x0001)
+        doc: Format version (0x0001 for v1, 0x0002 for v2)
       - id: block_size
         type: u2
         doc: Number of uint32 elements per block (default 16)
@@ -65,6 +69,8 @@ types:
           Keys stored in this node.
           Values are sorted within the node.
           Sentinel value 0xFFFFFFFF marks empty slots.
+          In v1 (version 0x0001), keys are limited to [0, 0x7FFFFFFF].
+          In v2 (version 0x0002), keys can be any uint32 in [0, 0xFFFFFFFE].
 
 instances:
   num_blocks:

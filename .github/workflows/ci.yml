@@ -13,8 +13,8 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go-version: ['1.22', '1.23']
-    
+        go-version: ['1.26']
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -28,19 +28,27 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Run tests (windows)
+      - name: Run tests (scalar, windows)
         if: runner.os == 'Windows'
         run: go test -v -race ./...
 
-      - name: Run tests
+      - name: Run tests (scalar)
         if: runner.os != 'Windows'
-        run: go test -v -race -coverprofile=coverage.out ./...
+        run: go test -v -race -coverprofile=coverage-scalar.out ./...
+
+      - name: Run tests (SIMD, linux amd64)
+        if: runner.os == 'Linux'
+        run: GOEXPERIMENT=simd go test -v -race ./...
+
+      - name: Run tests (SIMD, macOS amd64)
+        if: runner.os == 'macOS' && runner.arch == 'X64'
+        run: GOEXPERIMENT=simd go test -v -race ./...
 
       - name: Upload coverage
-        if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.23'
+        if: matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@v5
         with:
-          files: coverage.out
+          files: coverage-scalar.out
           fail_ci_if_error: false
 
   lint:
@@ -53,7 +61,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.23'
+          go-version: '1.26'
           cache: true
 
       - name: Run golangci-lint
@@ -71,11 +79,14 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.23'
+          go-version: '1.26'
           cache: true
 
-      - name: Build
+      - name: Build (scalar)
         run: go build -v ./...
+
+      - name: Build (SIMD)
+        run: GOEXPERIMENT=simd go build -v ./...
 
       - name: Verify go.mod is tidy
         run: |
@@ -92,10 +103,15 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.23'
+          go-version: '1.26'
           cache: true
 
-      - name: Run fuzz tests (short)
+      - name: Run fuzz tests (short, scalar)
         run: |
           go test -fuzz=FuzzBuildAndSearch -fuzztime=10s ./...
           go test -fuzz=FuzzSIMDConsistency -fuzztime=10s ./...
+
+      - name: Run fuzz tests (short, SIMD)
+        run: |
+          GOEXPERIMENT=simd go test -fuzz=FuzzBuildAndSearch -fuzztime=10s ./...
+          GOEXPERIMENT=simd go test -fuzz=FuzzSIMDConsistency -fuzztime=10s ./...

@@ -1,5 +1,7 @@
 # S-Tree
 
+[![GoDoc](https://pkg.go.dev/badge/github.com/Akron/stree-go?utm_source=godoc)](https://godoc.org/github.com/Akron/stree-go) [![Go Report Card](https://goreportcard.com/badge/Akron/stree-go)](https://goreportcard.com/report/github.com/Akron/stree-go) 
+
 A static B-tree implementation in Go based on the algorithm described
 at [Algorithmica - S-Tree](https://en.algorithmica.org/hpc/data-structures/s-tree/)
 with SIMD acceleration (SSE2, AVX2, and AVX-512 via Go 1.26+ experimental `archsimd`).
@@ -97,7 +99,7 @@ GOEXPERIMENT=simd go test -bench=BenchmarkSearchImplementations -benchmem ./...
 
 ## Performance
 
-Benchmark results on Intel Core Ultra 5 125H (GOEXPERIMENT=simd):
+Benchmark results on Intel Core Ultra 5 125H (`GOEXPERIMENT=simd`):
 
 | Operation | Size      | Generic | SSE2    | AVX2    |
 |-----------|-----------|---------|---------|---------|

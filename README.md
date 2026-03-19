@@ -1,6 +1,6 @@
 # S-Tree
 
-[![GoDoc](https://pkg.go.dev/badge/github.com/Akron/stree-go/v2?utm_source=godoc)](https://godoc.org/github.com/Akron/stree-go/v2) [![Go Report Card](https://goreportcard.com/badge/Akron/stree-go/v2)](https://goreportcard.com/report/github.com/Akron/stree-go/v2) 
+[![GoDoc](https://pkg.go.dev/badge/github.com/Akron/stree-go/v2?utm_source=godoc)](https://godoc.org/github.com/Akron/stree-go/v2) [![Go Report Card](https://goreportcard.com/badge/Akron/stree-go)](https://goreportcard.com/report/github.com/Akron/stree-go/v2) 
 
 A static B-tree implementation in Go based on the algorithm described
 at [Algorithmica - S-Tree](https://en.algorithmica.org/hpc/data-structures/s-tree/)

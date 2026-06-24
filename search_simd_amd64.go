@@ -59,7 +59,7 @@ func searchSSE2(blocks []byte, key uint32, numBlocks int) int {
 		var eq, gt uint8
 		var c archsimd.Uint32x4
 
-		c = archsimd.LoadUint32x4((*[4]uint32)(ptr))
+		c = archsimd.LoadUint32x4Array((*[4]uint32)(ptr))
 		eq = c.Equal(keyVec).ToBits()
 		if eq != 0 {
 			return k*blockSize + bits.TrailingZeros8(eq)
@@ -70,7 +70,7 @@ func searchSSE2(blocks []byte, key uint32, numBlocks int) int {
 			goto descend
 		}
 
-		c = archsimd.LoadUint32x4((*[4]uint32)(unsafe.Add(ptr, 16)))
+		c = archsimd.LoadUint32x4Array((*[4]uint32)(unsafe.Add(ptr, 16)))
 		eq = c.Equal(keyVec).ToBits()
 		if eq != 0 {
 			return k*blockSize + 4 + bits.TrailingZeros8(eq)
@@ -81,7 +81,7 @@ func searchSSE2(blocks []byte, key uint32, numBlocks int) int {
 			goto descend
 		}
 
-		c = archsimd.LoadUint32x4((*[4]uint32)(unsafe.Add(ptr, 32)))
+		c = archsimd.LoadUint32x4Array((*[4]uint32)(unsafe.Add(ptr, 32)))
 		eq = c.Equal(keyVec).ToBits()
 		if eq != 0 {
 			return k*blockSize + 8 + bits.TrailingZeros8(eq)
@@ -92,7 +92,7 @@ func searchSSE2(blocks []byte, key uint32, numBlocks int) int {
 			goto descend
 		}
 
-		c = archsimd.LoadUint32x4((*[4]uint32)(unsafe.Add(ptr, 48)))
+		c = archsimd.LoadUint32x4Array((*[4]uint32)(unsafe.Add(ptr, 48)))
 		eq = c.Equal(keyVec).ToBits()
 		if eq != 0 {
 			return k*blockSize + 12 + bits.TrailingZeros8(eq)
@@ -124,8 +124,8 @@ func searchAVX2(blocks []byte, key uint32, numBlocks int) int {
 
 	for k < numBlocks {
 		ptr := unsafe.Add(base, uintptr(k*blockSizeBytes))
-		lo := archsimd.LoadUint32x8((*[8]uint32)(ptr))
-		hi := archsimd.LoadUint32x8((*[8]uint32)(unsafe.Add(ptr, 32)))
+		lo := archsimd.LoadUint32x8Array((*[8]uint32)(ptr))
+		hi := archsimd.LoadUint32x8Array((*[8]uint32)(unsafe.Add(ptr, 32)))
 
 		eqLo := lo.Equal(keyVec).ToBits()
 		if eqLo != 0 {
@@ -171,7 +171,7 @@ func searchAVX512(blocks []byte, key uint32, numBlocks int) int {
 
 	for k < numBlocks {
 		ptr := unsafe.Add(base, uintptr(k*blockSizeBytes))
-		block := archsimd.LoadUint32x16((*[16]uint32)(ptr))
+		block := archsimd.LoadUint32x16Array((*[16]uint32)(ptr))
 
 		eqMask := block.Equal(keyVec).ToBits()
 		if eqMask != 0 {

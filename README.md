@@ -81,7 +81,8 @@ func main() {
 
 ## Building with SIMD
 
-SIMD acceleration requires Go 1.26+ and (for the moment) `GOEXPERIMENT=simd`:
+SIMD acceleration requires Go 1.26+ and (for the moment) `GOEXPERIMENT=simd`.
+Due to recent `archsimd` changes, `gotip` is currently preferred:
 
 ```shell
 # Build with SIMD support

@@ -25,6 +25,30 @@ type STree struct {
 	count int    // Number of unique elements
 }
 
+// BuildFromSorted creates a new S-Tree from a pre-sorted slice of unique uint32 values.
+// The input must be in strictly ascending order (sorted, no duplicates).
+// If check is true, the input is validated for strict ascending order and
+// ErrNotSorted is returned if violated. If check is false, the caller
+// guarantees correctness and no validation is performed.
+// Returns ErrEmptyInput if the input is empty.
+// Returns ErrValueTooLarge if any value equals the sentinel (0xFFFFFFFF).
+func BuildFromSorted(values []uint32, check bool) (*STree, error) {
+	if len(values) == 0 {
+		return nil, ErrEmptyInput
+	}
+	if check {
+		for i := 1; i < len(values); i++ {
+			if values[i] <= values[i-1] {
+				return nil, ErrNotSorted
+			}
+		}
+	}
+	if values[len(values)-1] > MaxValue {
+		return nil, ErrValueTooLarge
+	}
+	return buildFromUnique(values)
+}
+
 // Build creates a new S-Tree from the given slice of uint32 values.
 // The input slice does not need to be sorted; duplicates will be removed.
 // Returns ErrEmptyInput if the input is empty.
@@ -36,21 +60,8 @@ func Build(values []uint32) (*STree, error) {
 	if len(values) == 0 {
 		return nil, ErrEmptyInput
 	}
-
-	// Sort in-place and remove duplicates using slices.Compact
 	slices.Sort(values)
-	unique := slices.Compact(values)
-
-	if len(unique) == 0 {
-		return nil, ErrEmptyInput
-	}
-
-	// Since the slice is sorted, we only need to check the last (largest) value
-	if unique[len(unique)-1] > MaxValue {
-		return nil, ErrValueTooLarge
-	}
-
-	return buildFromUnique(unique)
+	return BuildFromSorted(slices.Compact(values), false)
 }
 
 // BuildFromKeyed creates a new S-Tree from a slice of Keyed items.

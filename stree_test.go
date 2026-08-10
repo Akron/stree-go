@@ -383,6 +383,119 @@ func TestBuildFromKeyed(t *testing.T) {
 	})
 }
 
+// TestBuildFromSorted tests the sorted input constructor.
+func TestBuildFromSorted(t *testing.T) {
+	t.Run("basic sorted input", func(t *testing.T) {
+		st, err := BuildFromSorted([]uint32{10, 20, 30, 40, 50}, true)
+		require.NoError(t, err)
+		assert.Equal(t, 5, st.Count())
+
+		reader, err := NewReader(st.Data())
+		require.NoError(t, err)
+		for _, v := range []uint32{10, 20, 30, 40, 50} {
+			assert.True(t, reader.Contains(v), "should contain %d", v)
+		}
+		assert.False(t, reader.Contains(25))
+	})
+
+	t.Run("single element", func(t *testing.T) {
+		st, err := BuildFromSorted([]uint32{42}, true)
+		require.NoError(t, err)
+		assert.Equal(t, 1, st.Count())
+	})
+
+	t.Run("empty input", func(t *testing.T) {
+		_, err := BuildFromSorted([]uint32{}, true)
+		assert.ErrorIs(t, err, ErrEmptyInput)
+	})
+
+	t.Run("nil input", func(t *testing.T) {
+		_, err := BuildFromSorted(nil, true)
+		assert.ErrorIs(t, err, ErrEmptyInput)
+	})
+
+	t.Run("unsorted input rejected", func(t *testing.T) {
+		_, err := BuildFromSorted([]uint32{30, 10, 20}, true)
+		assert.ErrorIs(t, err, ErrNotSorted)
+	})
+
+	t.Run("duplicates rejected", func(t *testing.T) {
+		_, err := BuildFromSorted([]uint32{10, 20, 20, 30}, true)
+		assert.ErrorIs(t, err, ErrNotSorted)
+	})
+
+	t.Run("sentinel value rejected", func(t *testing.T) {
+		_, err := BuildFromSorted([]uint32{1, 0xFFFFFFFF}, true)
+		assert.ErrorIs(t, err, ErrValueTooLarge)
+	})
+
+	t.Run("MaxValue boundary succeeds", func(t *testing.T) {
+		st, err := BuildFromSorted([]uint32{1, MaxValue}, true)
+		require.NoError(t, err)
+		assert.Equal(t, 2, st.Count())
+
+		reader, err := NewReader(st.Data())
+		require.NoError(t, err)
+		assert.True(t, reader.Contains(MaxValue))
+	})
+
+	t.Run("equivalence with Build", func(t *testing.T) {
+		sorted := []uint32{1, 5, 10, 50, 100, 500, 1000}
+		unsorted := []uint32{500, 1, 100, 10, 50, 1000, 5}
+
+		stSorted, err := BuildFromSorted(sorted, true)
+		require.NoError(t, err)
+
+		stBuild, err := Build(unsorted)
+		require.NoError(t, err)
+
+		assert.Equal(t, stSorted.Data(), stBuild.Data())
+	})
+
+	t.Run("large input", func(t *testing.T) {
+		input := make([]uint32, 10000)
+		for i := range input {
+			input[i] = uint32(i * 3)
+		}
+
+		st, err := BuildFromSorted(input, true)
+		require.NoError(t, err)
+		assert.Equal(t, 10000, st.Count())
+
+		reader, err := NewReader(st.Data())
+		require.NoError(t, err)
+		assert.True(t, reader.Contains(0))
+		assert.True(t, reader.Contains(9999*3))
+		assert.False(t, reader.Contains(1))
+	})
+
+	t.Run("descending order rejected", func(t *testing.T) {
+		_, err := BuildFromSorted([]uint32{50, 40, 30, 20, 10}, true)
+		assert.ErrorIs(t, err, ErrNotSorted)
+	})
+
+	t.Run("partially sorted rejected", func(t *testing.T) {
+		_, err := BuildFromSorted([]uint32{1, 2, 3, 2, 5}, true)
+		assert.ErrorIs(t, err, ErrNotSorted)
+	})
+
+	t.Run("high uint32 values succeed", func(t *testing.T) {
+		st, err := BuildFromSorted([]uint32{0x80000000, 0x90000000, 0xFFFFFFFE}, true)
+		require.NoError(t, err)
+		assert.Equal(t, 3, st.Count())
+	})
+
+	t.Run("check false skips validation", func(t *testing.T) {
+		_, err := BuildFromSorted([]uint32{30, 10, 20}, false)
+		assert.NoError(t, err, "unsorted input accepted when check=false")
+	})
+
+	t.Run("check false still rejects sentinel", func(t *testing.T) {
+		_, err := BuildFromSorted([]uint32{1, 0xFFFFFFFF}, false)
+		assert.ErrorIs(t, err, ErrValueTooLarge)
+	})
+}
+
 // TestSearch tests search functionality.
 func TestSearch(t *testing.T) {
 	t.Run("found and not found", func(t *testing.T) {

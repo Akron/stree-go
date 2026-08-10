@@ -51,6 +51,7 @@ var (
 	ErrDataTooShort   = errors.New("stree: data too short")
 	ErrInvalidBlockSz = errors.New("stree: invalid block size")
 	ErrValueTooLarge  = errors.New("stree: value exceeds maximum (must be < 0xFFFFFFFF)")
+	ErrNotSorted      = errors.New("stree: input not sorted or contains duplicates")
 )
 
 // header represents the S-Tree file header.

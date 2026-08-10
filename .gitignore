@@ -4,3 +4,6 @@ benchmarks/
 !README.md
 testdata
 mph-comparison
+.*
+!.gitignore
+!*-currentplan.md

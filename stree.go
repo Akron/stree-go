@@ -96,15 +96,14 @@ func parseHeader(data []byte) (*header, error) {
 	return h, nil
 }
 
-// bytes serializes the header to a byte slice.
-func (h *header) bytes() []byte {
-	buf := make([]byte, headerSize)
+// writeTo serializes the header into the provided buffer.
+// The buffer must be at least headerSize (16) bytes.
+func (h *header) writeTo(buf []byte) {
 	copy(buf[0:4], h.magic[:])
 	be.PutUint16(buf[4:6], h.version)
 	be.PutUint16(buf[6:8], h.blockSize)
 	be.PutUint32(buf[8:12], h.count)
 	be.PutUint32(buf[12:16], h.crc32)
-	return buf
 }
 
 // numBlocks returns the number of blocks needed to store count elements.

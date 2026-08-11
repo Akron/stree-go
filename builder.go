@@ -147,10 +147,9 @@ func buildFromUnique(unique []uint32) (*STree, error) {
 		version:   Version,
 		blockSize: blockSize,
 		count:     uint32(count),
-		crc32:     0, // Will be set after data construction
 	}
 	copy(header.magic[:], Magic)
-	copy(data[0:headerSize], header.bytes())
+	header.writeTo(data[0:headerSize])
 
 	// Build tree data using Eytzinger layout
 	blocks := data[headerSize:]
@@ -158,7 +157,7 @@ func buildFromUnique(unique []uint32) (*STree, error) {
 
 	// Compute and store CRC-32
 	header.crc32 = computeCRC32(data)
-	copy(data[0:headerSize], header.bytes())
+	header.writeTo(data[0:headerSize])
 
 	return &STree{
 		data:  data,
@@ -211,10 +210,9 @@ func buildFromUniqueKeyed[T Keyed](unique []uint32, items []T) (*STree, error) {
 		version:   Version,
 		blockSize: blockSize,
 		count:     uint32(count),
-		crc32:     0, // Will be set after data construction
 	}
 	copy(header.magic[:], Magic)
-	copy(data[0:headerSize], header.bytes())
+	header.writeTo(data[0:headerSize])
 
 	// Build tree data using Eytzinger layout
 	blocks := data[headerSize:]
@@ -222,7 +220,7 @@ func buildFromUniqueKeyed[T Keyed](unique []uint32, items []T) (*STree, error) {
 
 	// Compute and store CRC-32
 	header.crc32 = computeCRC32(data)
-	copy(data[0:headerSize], header.bytes())
+	header.writeTo(data[0:headerSize])
 
 	return &STree{
 		data:  data,

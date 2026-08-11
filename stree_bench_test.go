@@ -2,6 +2,7 @@ package stree
 
 import (
 	"fmt"
+	"iter"
 	"testing"
 )
 
@@ -392,6 +393,100 @@ func BenchmarkMemoryEfficiency(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
 				reader.Search(key)
+			}
+		})
+	}
+}
+
+// BenchmarkCursorVsPull2 compares pull-style Cursor against iter.Pull2(Sorted()).
+func BenchmarkCursorVsPull2(b *testing.B) {
+	sizes := []int{100, 1000, 10000, 100000}
+
+	for _, size := range sizes {
+		input := make([]uint32, size)
+		for i := range input {
+			input[i] = uint32(i * 2)
+		}
+
+		st, err := Build(input)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		reader, err := NewReader(st.Data())
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		b.Run(fmt.Sprintf("Cursor/n=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				c := reader.Cursor()
+				for {
+					_, _, ok := c.Next()
+					if !ok {
+						break
+					}
+				}
+			}
+		})
+
+		b.Run(fmt.Sprintf("Pull2/n=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				next, stop := iter.Pull2(reader.Sorted())
+				for {
+					_, _, ok := next()
+					if !ok {
+						break
+					}
+				}
+				stop()
+			}
+		})
+
+		b.Run(fmt.Sprintf("PushSorted/n=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				reader.Sorted()(func(_ uint32, _ int) bool {
+					return true
+				})
+			}
+		})
+	}
+}
+
+// BenchmarkCursorPeek benchmarks Peek + Next pattern used in k-way merge.
+func BenchmarkCursorPeek(b *testing.B) {
+	sizes := []int{1000, 10000, 100000}
+
+	for _, size := range sizes {
+		input := make([]uint32, size)
+		for i := range input {
+			input[i] = uint32(i * 2)
+		}
+
+		st, err := Build(input)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		reader, err := NewReader(st.Data())
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		b.Run(fmt.Sprintf("n=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				c := reader.Cursor()
+				for {
+					_, _, ok := c.Peek()
+					if !ok {
+						break
+					}
+					c.Next()
+				}
 			}
 		})
 	}

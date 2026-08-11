@@ -30,28 +30,28 @@ import (
 
 func main() {
 	// 1. Build the S-Tree
-	
+
 	// Input: unsorted uint32 values with duplicates.
 	values := []uint32{42, 17, 100, 5, 73, 88, 42, 17}
-	
+
 	tree, err := stree.Build(values)
 	if err != nil {
 		panic(err)
 	}
-	
+
 	// 2. Serialize to disk
 	file, err := os.Create("index.stree")
 	if err != nil {
 		panic(err)
 	}
-	
+
 	_, err = tree.WriteTo(file)
 	if err != nil {
 		file.Close()
 		panic(err)
 	}
 	file.Close()
-	
+
 	// 3. Load the S-Tree
 	data, err := os.ReadFile("index.stree")
 	if err != nil {
@@ -63,10 +63,9 @@ func main() {
 		panic(err)
 	}
 
-    // 4. Search for keys
-	// returns the position in the tree, or -1 if not found.
-	// The position can be used to correlate
-	// with external data.
+	// 4. Search for keys.
+	// Search returns the position in the tree, or -1 if not found.
+	// The position can be used to correlate with external data.
 	keysToFind := []uint32{42, 100, 999}
 	for _, key := range keysToFind {
 		pos := reader.Search(key)
@@ -76,8 +75,31 @@ func main() {
 			fmt.Printf("Key %d not found\n", key)
 		}
 	}
+
+	// 5. Iterate in sorted order without iter.Pull2.
+	// Cursor provides allocation-free pull-style access to sorted values.
+	c := reader.Cursor()
+	for {
+		value, index, ok := c.Next()
+		if !ok {
+			break
+		}
+		fmt.Printf("Sorted value %d at position %d\n", value, index)
+	}
+
+	// Peek lets you inspect the next value without advancing.
+	value, index, ok := c.Peek()
+	if ok {
+		fmt.Printf("Next value would be %d at position %d\n", value, index)
+	}
+
+	// Reset rewinds the cursor so it can be reused.
+	c.Reset()
 }
 ```
+
+`Cursor()` returns a value type, so it is safe to create multiple cursors from
+the same reader and use them independently.
 
 ## Building with SIMD
 

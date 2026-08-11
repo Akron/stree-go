@@ -871,3 +871,289 @@ func TestCRC32(t *testing.T) {
 		assert.False(t, validateCRC32(nil))
 	})
 }
+
+// TestCursorMatchesSorted verifies Cursor produces identical output to Sorted()
+// across a range of tree sizes, including block boundary edge cases.
+func TestCursorMatchesSorted(t *testing.T) {
+	sizes := []int{1, 2, 3, 15, 16, 17, 31, 32, 33, 100, 255, 256, 257, 272, 273, 1000, 4624, 4625, 10000}
+
+	for _, size := range sizes {
+		t.Run(fmt.Sprintf("n=%d", size), func(t *testing.T) {
+			input := make([]uint32, size)
+			for i := range input {
+				input[i] = uint32(i * 3)
+			}
+			st, err := Build(input)
+			require.NoError(t, err)
+
+			reader, err := NewReader(st.Data())
+			require.NoError(t, err)
+
+			var sortedVals []uint32
+			var sortedIdxs []int
+			reader.Sorted()(func(v uint32, idx int) bool {
+				sortedVals = append(sortedVals, v)
+				sortedIdxs = append(sortedIdxs, idx)
+				return true
+			})
+
+			c := reader.Cursor()
+			var cursorVals []uint32
+			var cursorIdxs []int
+			for {
+				v, idx, ok := c.Next()
+				if !ok {
+					break
+				}
+				cursorVals = append(cursorVals, v)
+				cursorIdxs = append(cursorIdxs, idx)
+			}
+
+			assert.Equal(t, sortedVals, cursorVals, "values mismatch for n=%d", size)
+			assert.Equal(t, sortedIdxs, cursorIdxs, "indices mismatch for n=%d", size)
+		})
+	}
+}
+
+// TestCursorPeek verifies Peek returns the next value without advancing.
+func TestCursorPeek(t *testing.T) {
+	st, err := Build([]uint32{10, 20, 30, 40, 50})
+	require.NoError(t, err)
+
+	reader, err := NewReader(st.Data())
+	require.NoError(t, err)
+
+	c := reader.Cursor()
+
+	// Peek should return the first value
+	v1, idx1, ok1 := c.Peek()
+	require.True(t, ok1)
+
+	// Subsequent Peek returns the same value
+	v2, idx2, ok2 := c.Peek()
+	assert.Equal(t, v1, v2)
+	assert.Equal(t, idx1, idx2)
+	assert.Equal(t, ok1, ok2)
+
+	// Next returns the same value Peek showed
+	v3, idx3, ok3 := c.Next()
+	assert.Equal(t, v1, v3)
+	assert.Equal(t, idx1, idx3)
+	assert.Equal(t, ok1, ok3)
+
+	// Now Peek should show the second value
+	v4, _, ok4 := c.Peek()
+	require.True(t, ok4)
+	assert.NotEqual(t, v1, v4, "Peek after Next should show a different value")
+
+	// Drain the cursor
+	for {
+		_, _, ok := c.Next()
+		if !ok {
+			break
+		}
+	}
+
+	// Peek on exhausted cursor
+	_, _, ok := c.Peek()
+	assert.False(t, ok)
+}
+
+// TestCursorPartialIteration tests stopping early and restarting with Reset.
+func TestCursorPartialIteration(t *testing.T) {
+	input := make([]uint32, 100)
+	for i := range input {
+		input[i] = uint32(i * 2)
+	}
+	st, err := Build(input)
+	require.NoError(t, err)
+
+	reader, err := NewReader(st.Data())
+	require.NoError(t, err)
+
+	c := reader.Cursor()
+
+	// Read only 5 elements
+	var partial []uint32
+	for range 5 {
+		v, _, ok := c.Next()
+		require.True(t, ok)
+		partial = append(partial, v)
+	}
+	assert.Equal(t, []uint32{0, 2, 4, 6, 8}, partial)
+
+	// Reset and iterate fully
+	c.Reset()
+	var full []uint32
+	for {
+		v, _, ok := c.Next()
+		if !ok {
+			break
+		}
+		full = append(full, v)
+	}
+
+	assert.Len(t, full, 100)
+	assert.Equal(t, uint32(0), full[0])
+	assert.Equal(t, uint32(198), full[99])
+
+	// Verify sorted order
+	for i := 1; i < len(full); i++ {
+		assert.Less(t, full[i-1], full[i])
+	}
+}
+
+// TestCursorEmpty tests cursor on a tree with zero blocks.
+func TestCursorEmpty(t *testing.T) {
+	emptyReader := &Reader{numBlocks: 0}
+	c := emptyReader.Cursor()
+
+	v, idx, ok := c.Next()
+	assert.False(t, ok)
+	assert.Equal(t, uint32(0), v)
+	assert.Equal(t, 0, idx)
+
+	v, idx, ok = c.Peek()
+	assert.False(t, ok)
+	assert.Equal(t, uint32(0), v)
+	assert.Equal(t, 0, idx)
+
+	c.Reset()
+	_, _, ok = c.Next()
+	assert.False(t, ok)
+}
+
+// TestCursorSingleElement tests cursor on a 1-element tree.
+func TestCursorSingleElement(t *testing.T) {
+	st, err := Build([]uint32{42})
+	require.NoError(t, err)
+
+	reader, err := NewReader(st.Data())
+	require.NoError(t, err)
+
+	c := reader.Cursor()
+
+	v, idx, ok := c.Next()
+	require.True(t, ok)
+	assert.Equal(t, uint32(42), v)
+	assert.GreaterOrEqual(t, idx, 0)
+
+	// Verify position maps back
+	blockIdx := idx / blockSize
+	posInBlock := idx % blockSize
+	assert.Equal(t, uint32(42), reader.blockValue(blockIdx, posInBlock))
+
+	_, _, ok = c.Next()
+	assert.False(t, ok)
+}
+
+// TestCursorLarge tests cursor on a 100k element tree.
+func TestCursorLarge(t *testing.T) {
+	const n = 100_000
+	input := make([]uint32, n)
+	for i := range input {
+		input[i] = uint32(i * 5)
+	}
+	st, err := Build(input)
+	require.NoError(t, err)
+
+	reader, err := NewReader(st.Data())
+	require.NoError(t, err)
+
+	c := reader.Cursor()
+
+	count := 0
+	var prev uint32
+	first := true
+	for {
+		v, idx, ok := c.Next()
+		if !ok {
+			break
+		}
+		count++
+
+		if !first {
+			assert.Less(t, prev, v, "values must be strictly ascending")
+		}
+		first = false
+		prev = v
+
+		// Verify index maps to correct value
+		blockIdx := idx / blockSize
+		posInBlock := idx % blockSize
+		assert.Equal(t, v, reader.blockValue(blockIdx, posInBlock))
+	}
+
+	assert.Equal(t, n, count)
+}
+
+// TestCursorMultipleResets tests multiple Reset cycles.
+func TestCursorMultipleResets(t *testing.T) {
+	st, err := Build([]uint32{5, 10, 15, 20})
+	require.NoError(t, err)
+
+	reader, err := NewReader(st.Data())
+	require.NoError(t, err)
+
+	c := reader.Cursor()
+
+	for cycle := range 3 {
+		var vals []uint32
+		for {
+			v, _, ok := c.Next()
+			if !ok {
+				break
+			}
+			vals = append(vals, v)
+		}
+		assert.Equal(t, []uint32{5, 10, 15, 20}, vals, "cycle %d", cycle)
+		c.Reset()
+	}
+}
+
+// TestCursorTwoConcurrent verifies two cursors from the same reader work independently.
+func TestCursorTwoConcurrent(t *testing.T) {
+	st, err := Build([]uint32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
+	require.NoError(t, err)
+
+	reader, err := NewReader(st.Data())
+	require.NoError(t, err)
+
+	c1 := reader.Cursor()
+	c2 := reader.Cursor()
+
+	// Advance c1 by 3
+	for range 3 {
+		c1.Next()
+	}
+
+	// c2 should still be at the beginning
+	v2, _, ok2 := c2.Peek()
+	require.True(t, ok2)
+
+	v1, _, ok1 := c1.Peek()
+	require.True(t, ok1)
+
+	assert.Less(t, v2, v1, "c2 should be behind c1")
+
+	// Drain both and verify they produce the same total set
+	var vals1, vals2 []uint32
+	for {
+		v, _, ok := c1.Next()
+		if !ok {
+			break
+		}
+		vals1 = append(vals1, v)
+	}
+	for {
+		v, _, ok := c2.Next()
+		if !ok {
+			break
+		}
+		vals2 = append(vals2, v)
+	}
+
+	// c1 should have 7 remaining, c2 should have all 10
+	assert.Len(t, vals1, 7)
+	assert.Len(t, vals2, 10)
+}

@@ -132,6 +132,120 @@ func BuildFromKeyed[T Keyed](items []T) (*STree, error) {
 	return buildFromUniqueKeyed(unique, uniqueItems)
 }
 
+// BuildFromSortedKeyed creates an S-Tree from a pre-sorted slice of Keyed items.
+// The input must be in strictly ascending key order (sorted, no duplicates).
+// SetIndex is called on each item with its Eytzinger position during construction.
+//
+// If check is true, the input is validated for strict ascending key order.
+// If check is false, the caller guarantees correctness.
+//
+// This is more efficient than BuildFromKeyed for callers that maintain sorted
+// data structures (e.g., merge outputs, pre-sorted index entries).
+func BuildFromSortedKeyed[T Keyed](items []T, check bool) (*STree, error) {
+	if len(items) == 0 {
+		return nil, ErrEmptyInput
+	}
+	if check {
+		for i := 1; i < len(items); i++ {
+			if items[i].Key() <= items[i-1].Key() {
+				return nil, ErrNotSorted
+			}
+		}
+	}
+	if items[len(items)-1].Key() > MaxValue {
+		return nil, ErrValueTooLarge
+	}
+	keys := make([]uint32, len(items))
+	for i, item := range items {
+		keys[i] = item.Key()
+	}
+	return buildFromUniqueKeyed(keys, items)
+}
+
+// BuildFromSortedFunc builds an S-Tree from n pre-sorted keys using callbacks.
+// The key function returns the key at sorted position i (0-based).
+// The setIndex callback is called with (sortedIndex, eytzingerIndex) for each key;
+// it may be nil if index tracking is not needed.
+//
+// If check is true, the input is validated for strict ascending key order.
+// If check is false, the caller guarantees correctness.
+//
+// This is the most allocation-efficient builder: it avoids both interface slices
+// and internal key extraction, requiring only the tree data allocation itself.
+func BuildFromSortedFunc(n int, key func(i int) uint32, setIndex func(i int, idx uint32), check bool) (*STree, error) {
+	if n == 0 {
+		return nil, ErrEmptyInput
+	}
+	if check {
+		for i := 1; i < n; i++ {
+			if key(i) <= key(i-1) {
+				return nil, ErrNotSorted
+			}
+		}
+	}
+	if key(n-1) > MaxValue {
+		return nil, ErrValueTooLarge
+	}
+	return buildFromFunc(n, key, setIndex)
+}
+
+// buildFromFunc creates an S-Tree using callback functions for key access and index tracking.
+func buildFromFunc(n int, key func(i int) uint32, setIndex func(i int, idx uint32)) (*STree, error) {
+	nb := numBlocks(n)
+	totalSize := headerSize + nb*blockSizeBytes
+
+	data := make([]byte, totalSize)
+
+	hdr := &header{
+		version:   Version,
+		blockSize: blockSize,
+		count:     uint32(n),
+	}
+	copy(hdr.magic[:], Magic)
+	hdr.writeTo(data[0:headerSize])
+
+	blocks := data[headerSize:]
+	buildEytzingerFunc(n, key, setIndex, blocks, nb)
+
+	hdr.crc32 = computeCRC32(data)
+	hdr.writeTo(data[0:headerSize])
+
+	return &STree{
+		data:  data,
+		count: n,
+	}, nil
+}
+
+// buildEytzingerFunc constructs the S-Tree using Eytzinger numeration with callback functions.
+func buildEytzingerFunc(n int, key func(i int) uint32, setIndex func(i int, idx uint32), blocks []byte, numBlks int) {
+	const sentinel64 = uint64(0xFFFFFFFFFFFFFFFF)
+	for i := 0; i < len(blocks); i += 8 {
+		be.PutUint64(blocks[i:], sentinel64)
+	}
+
+	t := 0
+
+	var build func(k int)
+	build = func(k int) {
+		if k < numBlks {
+			for i := range blockSize {
+				build(childIndex(k, i))
+				if t < n {
+					offset := k*blockSizeBytes + i*4
+					be.PutUint32(blocks[offset:], key(t))
+					if setIndex != nil {
+						setIndex(t, uint32(k*blockSize+i))
+					}
+					t++
+				}
+			}
+			build(childIndex(k, blockSize))
+		}
+	}
+
+	build(0)
+}
+
 // buildFromUnique creates an S-Tree from a sorted, deduplicated slice (no index tracking).
 func buildFromUnique(unique []uint32) (*STree, error) {
 	// Calculate required space

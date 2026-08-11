@@ -214,6 +214,52 @@ func BenchmarkBuildFromKeyed(b *testing.B) {
 	}
 }
 
+// BenchmarkBuildFromSortedKeyed benchmarks sorted Keyed building.
+func BenchmarkBuildFromSortedKeyed(b *testing.B) {
+	sizes := []int{100, 1000, 10000, 100000}
+
+	for _, size := range sizes {
+		entries := make([]*BenchEntry, size)
+		for i := range entries {
+			entries[i] = &BenchEntry{key: uint32(i)}
+		}
+
+		b.Run(fmt.Sprintf("n=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				for _, e := range entries {
+					e.index = 0
+				}
+				_, _ = BuildFromSortedKeyed(entries, false)
+			}
+		})
+	}
+}
+
+// BenchmarkBuildFromSortedFunc benchmarks callback-based sorted building.
+func BenchmarkBuildFromSortedFunc(b *testing.B) {
+	sizes := []int{100, 1000, 10000, 100000}
+
+	for _, size := range sizes {
+		keys := make([]uint32, size)
+		indices := make([]uint32, size)
+		for i := range keys {
+			keys[i] = uint32(i)
+		}
+
+		b.Run(fmt.Sprintf("n=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_, _ = BuildFromSortedFunc(size,
+					func(i int) uint32 { return keys[i] },
+					func(i int, idx uint32) { indices[i] = idx },
+					false,
+				)
+			}
+		})
+	}
+}
+
 // BenchmarkSortedIteration benchmarks in-order traversal.
 func BenchmarkSortedIteration(b *testing.B) {
 	sizes := []int{100, 1000, 10000, 100000}

@@ -1111,6 +1111,373 @@ func TestCursorMultipleResets(t *testing.T) {
 	}
 }
 
+// TestBuildFromSortedKeyed tests the sorted Keyed builder.
+func TestBuildFromSortedKeyed(t *testing.T) {
+	t.Run("index correlation", func(t *testing.T) {
+		entries := []*TestEntry{
+			{key: 5, data: "five"},
+			{key: 10, data: "ten"},
+			{key: 20, data: "twenty"},
+		}
+
+		st, err := BuildFromSortedKeyed(entries, true)
+		require.NoError(t, err)
+		assert.Equal(t, 3, st.Count())
+
+		reader, err := NewReader(st.Data())
+		require.NoError(t, err)
+
+		for _, e := range entries {
+			pos := reader.Search(e.key)
+			assert.Equal(t, int(e.index), pos, "index for key %d should match", e.key)
+		}
+	})
+
+	t.Run("single element", func(t *testing.T) {
+		entries := []*TestEntry{{key: 42, data: "only"}}
+		st, err := BuildFromSortedKeyed(entries, true)
+		require.NoError(t, err)
+		assert.Equal(t, 1, st.Count())
+
+		reader, err := NewReader(st.Data())
+		require.NoError(t, err)
+		assert.True(t, reader.Contains(42))
+	})
+
+	t.Run("matches BuildFromKeyed output", func(t *testing.T) {
+		sorted := []*TestEntry{
+			{key: 1, data: "a"},
+			{key: 5, data: "b"},
+			{key: 10, data: "c"},
+			{key: 50, data: "d"},
+			{key: 100, data: "e"},
+			{key: 500, data: "f"},
+			{key: 1000, data: "g"},
+		}
+
+		unsorted := []*TestEntry{
+			{key: 500, data: "f"},
+			{key: 1, data: "a"},
+			{key: 100, data: "e"},
+			{key: 10, data: "c"},
+			{key: 50, data: "d"},
+			{key: 1000, data: "g"},
+			{key: 5, data: "b"},
+		}
+
+		stSorted, err := BuildFromSortedKeyed(sorted, true)
+		require.NoError(t, err)
+
+		stKeyed, err := BuildFromKeyed(unsorted)
+		require.NoError(t, err)
+
+		assert.Equal(t, stSorted.Data(), stKeyed.Data(), "tree data should be identical")
+
+		// Indices should also match
+		for i := range sorted {
+			assert.Equal(t, sorted[i].index, unsorted[i].index,
+				"index for key %d should match", sorted[i].key)
+		}
+	})
+
+	t.Run("empty input", func(t *testing.T) {
+		_, err := BuildFromSortedKeyed([]*TestEntry{}, true)
+		assert.ErrorIs(t, err, ErrEmptyInput)
+
+		var nilEntries []*TestEntry
+		_, err = BuildFromSortedKeyed(nilEntries, true)
+		assert.ErrorIs(t, err, ErrEmptyInput)
+	})
+
+	t.Run("unsorted input rejected", func(t *testing.T) {
+		entries := []*TestEntry{
+			{key: 30},
+			{key: 10},
+			{key: 20},
+		}
+		_, err := BuildFromSortedKeyed(entries, true)
+		assert.ErrorIs(t, err, ErrNotSorted)
+	})
+
+	t.Run("duplicates rejected", func(t *testing.T) {
+		entries := []*TestEntry{
+			{key: 10},
+			{key: 20},
+			{key: 20},
+			{key: 30},
+		}
+		_, err := BuildFromSortedKeyed(entries, true)
+		assert.ErrorIs(t, err, ErrNotSorted)
+	})
+
+	t.Run("sentinel key rejected", func(t *testing.T) {
+		entries := []*TestEntry{{key: 0xFFFFFFFF}}
+		_, err := BuildFromSortedKeyed(entries, true)
+		assert.ErrorIs(t, err, ErrValueTooLarge)
+	})
+
+	t.Run("MaxValue boundary succeeds", func(t *testing.T) {
+		entries := []*TestEntry{
+			{key: 1},
+			{key: MaxValue},
+		}
+		st, err := BuildFromSortedKeyed(entries, true)
+		require.NoError(t, err)
+		assert.Equal(t, 2, st.Count())
+
+		reader, err := NewReader(st.Data())
+		require.NoError(t, err)
+		assert.True(t, reader.Contains(MaxValue))
+	})
+
+	t.Run("check false skips validation", func(t *testing.T) {
+		entries := []*TestEntry{
+			{key: 30},
+			{key: 10},
+			{key: 20},
+		}
+		_, err := BuildFromSortedKeyed(entries, false)
+		assert.NoError(t, err, "unsorted input accepted when check=false")
+	})
+
+	t.Run("check false still rejects sentinel", func(t *testing.T) {
+		entries := []*TestEntry{{key: 0xFFFFFFFF}}
+		_, err := BuildFromSortedKeyed(entries, false)
+		assert.ErrorIs(t, err, ErrValueTooLarge)
+	})
+
+	t.Run("large input", func(t *testing.T) {
+		entries := make([]*TestEntry, 10000)
+		for i := range entries {
+			entries[i] = &TestEntry{key: uint32(i * 3)}
+		}
+
+		st, err := BuildFromSortedKeyed(entries, true)
+		require.NoError(t, err)
+		assert.Equal(t, 10000, st.Count())
+
+		reader, err := NewReader(st.Data())
+		require.NoError(t, err)
+		assert.True(t, reader.Contains(0))
+		assert.True(t, reader.Contains(9999*3))
+		assert.False(t, reader.Contains(1))
+
+		// Verify all indices are set correctly
+		for _, e := range entries {
+			pos := reader.Search(e.key)
+			assert.Equal(t, int(e.index), pos, "index for key %d", e.key)
+		}
+	})
+
+	t.Run("high uint32 values succeed", func(t *testing.T) {
+		entries := []*TestEntry{
+			{key: 0x80000000},
+			{key: 0x90000000},
+			{key: 0xFFFFFFFE},
+		}
+		st, err := BuildFromSortedKeyed(entries, true)
+		require.NoError(t, err)
+		assert.Equal(t, 3, st.Count())
+	})
+}
+
+// TestBuildFromSortedFunc tests the callback-based sorted builder.
+func TestBuildFromSortedFunc(t *testing.T) {
+	t.Run("basic correctness", func(t *testing.T) {
+		keys := []uint32{10, 20, 30, 40, 50}
+		indices := make([]uint32, len(keys))
+
+		st, err := BuildFromSortedFunc(len(keys),
+			func(i int) uint32 { return keys[i] },
+			func(i int, idx uint32) { indices[i] = idx },
+			true,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, 5, st.Count())
+
+		reader, err := NewReader(st.Data())
+		require.NoError(t, err)
+		for i, k := range keys {
+			pos := reader.Search(k)
+			assert.GreaterOrEqual(t, pos, 0, "key %d should be found", k)
+			assert.Equal(t, int(indices[i]), pos, "index for key %d should match", k)
+		}
+	})
+
+	t.Run("matches BuildFromSorted output", func(t *testing.T) {
+		keys := []uint32{1, 5, 10, 50, 100, 500, 1000}
+
+		stFunc, err := BuildFromSortedFunc(len(keys),
+			func(i int) uint32 { return keys[i] },
+			nil,
+			true,
+		)
+		require.NoError(t, err)
+
+		stSorted, err := BuildFromSorted(keys, true)
+		require.NoError(t, err)
+
+		assert.Equal(t, stSorted.Data(), stFunc.Data(), "tree data should be identical")
+	})
+
+	t.Run("equivalence with BuildFromSortedKeyed", func(t *testing.T) {
+		entries := make([]*TestEntry, 100)
+		for i := range entries {
+			entries[i] = &TestEntry{key: uint32(i * 7)}
+		}
+
+		stKeyed, err := BuildFromSortedKeyed(entries, true)
+		require.NoError(t, err)
+
+		funcIndices := make([]uint32, len(entries))
+		stFunc, err := BuildFromSortedFunc(len(entries),
+			func(i int) uint32 { return entries[i].key },
+			func(i int, idx uint32) { funcIndices[i] = idx },
+			true,
+		)
+		require.NoError(t, err)
+
+		assert.Equal(t, stKeyed.Data(), stFunc.Data(), "tree data should be identical")
+
+		for i := range entries {
+			assert.Equal(t, entries[i].index, funcIndices[i],
+				"index at position %d should match", i)
+		}
+	})
+
+	t.Run("single element", func(t *testing.T) {
+		st, err := BuildFromSortedFunc(1,
+			func(i int) uint32 { return 42 },
+			nil,
+			true,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, 1, st.Count())
+
+		reader, err := NewReader(st.Data())
+		require.NoError(t, err)
+		assert.True(t, reader.Contains(42))
+	})
+
+	t.Run("n=0 returns error", func(t *testing.T) {
+		_, err := BuildFromSortedFunc(0,
+			func(i int) uint32 { return 0 },
+			nil,
+			true,
+		)
+		assert.ErrorIs(t, err, ErrEmptyInput)
+	})
+
+	t.Run("unsorted input rejected", func(t *testing.T) {
+		keys := []uint32{30, 10, 20}
+		_, err := BuildFromSortedFunc(len(keys),
+			func(i int) uint32 { return keys[i] },
+			nil,
+			true,
+		)
+		assert.ErrorIs(t, err, ErrNotSorted)
+	})
+
+	t.Run("duplicates rejected", func(t *testing.T) {
+		keys := []uint32{10, 20, 20, 30}
+		_, err := BuildFromSortedFunc(len(keys),
+			func(i int) uint32 { return keys[i] },
+			nil,
+			true,
+		)
+		assert.ErrorIs(t, err, ErrNotSorted)
+	})
+
+	t.Run("sentinel value rejected", func(t *testing.T) {
+		_, err := BuildFromSortedFunc(1,
+			func(i int) uint32 { return 0xFFFFFFFF },
+			nil,
+			true,
+		)
+		assert.ErrorIs(t, err, ErrValueTooLarge)
+	})
+
+	t.Run("MaxValue boundary succeeds", func(t *testing.T) {
+		keys := []uint32{1, MaxValue}
+		st, err := BuildFromSortedFunc(len(keys),
+			func(i int) uint32 { return keys[i] },
+			nil,
+			true,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, 2, st.Count())
+
+		reader, err := NewReader(st.Data())
+		require.NoError(t, err)
+		assert.True(t, reader.Contains(MaxValue))
+	})
+
+	t.Run("check false skips validation", func(t *testing.T) {
+		keys := []uint32{30, 10, 20}
+		_, err := BuildFromSortedFunc(len(keys),
+			func(i int) uint32 { return keys[i] },
+			nil,
+			false,
+		)
+		assert.NoError(t, err, "unsorted input accepted when check=false")
+	})
+
+	t.Run("check false still rejects sentinel", func(t *testing.T) {
+		_, err := BuildFromSortedFunc(1,
+			func(i int) uint32 { return 0xFFFFFFFF },
+			nil,
+			false,
+		)
+		assert.ErrorIs(t, err, ErrValueTooLarge)
+	})
+
+	t.Run("nil setIndex is allowed", func(t *testing.T) {
+		keys := []uint32{10, 20, 30}
+		st, err := BuildFromSortedFunc(len(keys),
+			func(i int) uint32 { return keys[i] },
+			nil,
+			true,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, 3, st.Count())
+	})
+
+	t.Run("large input", func(t *testing.T) {
+		const n = 10000
+		indices := make([]uint32, n)
+
+		st, err := BuildFromSortedFunc(n,
+			func(i int) uint32 { return uint32(i * 3) },
+			func(i int, idx uint32) { indices[i] = idx },
+			true,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, n, st.Count())
+
+		reader, err := NewReader(st.Data())
+		require.NoError(t, err)
+		assert.True(t, reader.Contains(0))
+		assert.True(t, reader.Contains(uint32((n-1)*3)))
+		assert.False(t, reader.Contains(1))
+
+		for i := range n {
+			pos := reader.Search(uint32(i * 3))
+			assert.Equal(t, int(indices[i]), pos, "index at position %d", i)
+		}
+	})
+
+	t.Run("high uint32 values succeed", func(t *testing.T) {
+		keys := []uint32{0x80000000, 0x90000000, 0xFFFFFFFE}
+		st, err := BuildFromSortedFunc(len(keys),
+			func(i int) uint32 { return keys[i] },
+			nil,
+			true,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, 3, st.Count())
+	})
+}
+
 // TestCursorTwoConcurrent verifies two cursors from the same reader work independently.
 func TestCursorTwoConcurrent(t *testing.T) {
 	st, err := Build([]uint32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10})

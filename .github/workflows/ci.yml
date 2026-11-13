@@ -45,6 +45,16 @@ jobs:
         if: runner.os == 'Linux'
         run: GOEXPERIMENT=simd gotip test -v -race ./...
 
+      - name: Show CPU
+        if: runner.os == 'Linux'
+        run: |
+          grep -m1 'model name' /proc/cpuinfo
+          grep -o -w 'avx512f\|avx2\|avx' /proc/cpuinfo | sort -u | tr '\n' ' '
+
+      - name: Test simulated AVX-only and SSE-only CPUs, check 128-bit ISA
+        if: runner.os == 'Linux'
+        run: make GO=gotip test-cpu-levels
+
       - name: Run tests (SIMD, macOS amd64)
         if: runner.os == 'macOS' && runner.arch == 'X64'
         run: GOEXPERIMENT=simd gotip test -v -race ./...

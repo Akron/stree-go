@@ -833,6 +833,74 @@ func TestSIMDConsistency(t *testing.T) {
 	}
 }
 
+// TestSearchImplementationsAgree runs every SIMD kernel that the CPU supports
+// directly against searchGeneric, independent of the kernel chosen by init().
+// This covers the 128-bit kernel (searchSSE2) on AVX2 hosts as well. The keys
+// near 1<<31 matter: the 128-bit and 256-bit kernels compare with a sign-bias
+// XOR. Without GOEXPERIMENT=simd all implementations are searchGeneric.
+func TestSearchImplementationsAgree(t *testing.T) {
+	impls := []struct {
+		name  string
+		avail func() bool
+		fn    func([]byte, uint32, int) int
+	}{
+		{"SSE2", HasSSE2, SearchSSE2},
+		{"AVX2", HasAVX2, SearchAVX2},
+		{"AVX512", HasAVX512, SearchAVX512},
+	}
+
+	special := []uint32{
+		0, 1, 2, 1<<31 - 2, 1<<31 - 1, 1 << 31, 1<<31 + 1,
+		1<<32 - 3, 1<<32 - 2, // MaxValue
+	}
+
+	for _, size := range []int{1, 2, 15, 16, 17, 100, 272, 273, 289, 5000} {
+		t.Run(fmt.Sprintf("n=%d", size), func(t *testing.T) {
+			// Spread the values over the whole uint32 range, then add the
+			// special values (Build sorts and deduplicates).
+			stride := uint32(MaxValue / uint32(size+1))
+			input := make([]uint32, 0, size+len(special))
+			for i := 1; i <= size; i++ {
+				input = append(input, uint32(i)*stride)
+			}
+			input = append(input, special...)
+
+			st, err := Build(input)
+			require.NoError(t, err)
+			reader, err := NewReader(st.Data())
+			require.NoError(t, err)
+
+			blocks := reader.Data()[headerSize:]
+			numBlocks := reader.NumBlocks()
+
+			// Probe every stored value, its neighbours and the special keys.
+			keys := append([]uint32{}, special...)
+			for i := 1; i <= size; i++ {
+				v := uint32(i) * stride
+				keys = append(keys, v-1, v, v+1)
+			}
+
+			for _, impl := range impls {
+				if !impl.avail() {
+					continue
+				}
+				t.Run(impl.name, func(t *testing.T) {
+					for _, key := range keys {
+						if key == sentinel {
+							continue
+						}
+						want := searchGeneric(blocks, key, numBlocks)
+						got := impl.fn(blocks, key, numBlocks)
+						if want != got {
+							t.Fatalf("key %d: generic=%d, %s=%d", key, want, impl.name, got)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
 // TestCRC32 tests CRC-32 checksum functionality.
 func TestCRC32(t *testing.T) {
 	t.Run("valid after build", func(t *testing.T) {

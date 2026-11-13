@@ -9,25 +9,54 @@ import (
 	"unsafe"
 )
 
+// simdLevel reports which SIMD kernels can run on this CPU. The features
+// form a cascade (AVX512 implies AVX2 implies AVX): archsimd reads each
+// feature from an independent flag, so a simulated CPU (GODEBUG=cpu.avx=off)
+// could otherwise report AVX2 without AVX.
+func simdLevel() (hasAVX, hasAVX2, hasAVX512 bool) {
+	hasAVX = archsimd.X86.AVX()
+	hasAVX2 = hasAVX && archsimd.X86.AVX2()
+	hasAVX512 = hasAVX2 && archsimd.X86.AVX512()
+	return
+}
+
 func init() {
-	if archsimd.X86.AVX512() {
+	hasAVX, hasAVX2, hasAVX512 := simdLevel()
+	switch {
+	case hasAVX512:
 		search = searchAVX512
-	} else if archsimd.X86.AVX2() {
+	case hasAVX2:
 		search = searchAVX2
-	} else {
+	case hasAVX:
+		// 128-bit kernel: archsimd emits VEX encoding only, so it needs
+		// AVX (but not AVX2).
 		search = searchSSE2
+	default:
+		// SSE only (no AVX): archsimd cannot run on this CPU. Keep
+		// searchGeneric (the package default), silently.
+		return
 	}
 	simdAvailable = true
 }
 
 // HasAVX512 returns true if AVX-512 is available.
-func HasAVX512() bool { return archsimd.X86.AVX512() }
+func HasAVX512() bool {
+	_, _, ok := simdLevel()
+	return ok
+}
 
 // HasAVX2 returns true if AVX2 is available.
-func HasAVX2() bool { return archsimd.X86.AVX2() }
+func HasAVX2() bool {
+	_, ok, _ := simdLevel()
+	return ok
+}
 
-// HasSSE2 returns true if SSE2 is available (always true on amd64).
-func HasSSE2() bool { return true }
+// HasSSE2 reports whether the 128-bit kernel (searchSSE2) can run. The name
+// is historical: archsimd emits VEX encoding only, so the kernel needs AVX.
+func HasSSE2() bool {
+	ok, _, _ := simdLevel()
+	return ok
+}
 
 // Exported search function variables for benchmarking.
 var (
@@ -47,9 +76,9 @@ func searchSSE2(blocks []byte, key uint32, numBlocks int) int {
 		return -1
 	}
 
-	keyVec := archsimd.BroadcastUint32x4(key)
-	biasVec := archsimd.BroadcastInt32x4(math.MinInt32)
-	biasedKeyVec := archsimd.BroadcastInt32x4(int32(key ^ 0x80000000))
+	keyVec := broadcastUint32x4(key)
+	biasVec := broadcastInt32x4(math.MinInt32)
+	biasedKeyVec := broadcastInt32x4(int32(key ^ 0x80000000))
 	base := unsafe.Pointer(unsafe.SliceData(blocks))
 	k := 0
 

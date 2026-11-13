@@ -4,11 +4,12 @@
 
 A static B-tree implementation in Go based on the algorithm described
 at [Algorithmica - S-Tree](https://en.algorithmica.org/hpc/data-structures/s-tree/)
-with SIMD acceleration (SSE2, AVX2, and AVX-512 via `gotip` experimental `archsimd`).
+with SIMD acceleration (128-bit AVX, AVX2, and AVX-512 via `gotip` experimental `archsimd`;
+CPUs without AVX use the pure Go search).
 
 **This is early work and may change without warning!**
 
-S-Tree is designed for high-performance, cache-efficient lookups. It uses Eytzinger (B-tree) numeration with 16-element blocks that align with typical 64-byte CPU cache lines, maximizing cache utilization during tree traversal. On amd64 platforms with `GOEXPERIMENT=simd`, the library automatically detects and uses SSE2, AVX2, or AVX-512 SIMD instructions at runtime for accelerated search operations, while providing a pure Go fallback that works on all platforms without SIMD support.
+S-Tree is designed for high-performance, cache-efficient lookups. It uses Eytzinger (B-tree) numeration with 16-element blocks that align with typical 64-byte CPU cache lines, maximizing cache utilization during tree traversal. On amd64 platforms with `GOEXPERIMENT=simd`, the library automatically detects and uses 128-bit AVX, AVX2, or AVX-512 SIMD instructions at runtime for accelerated search operations, while providing a pure Go fallback that works on all platforms and CPUs without SIMD support (including amd64 CPUs without AVX). `simd/archsimd` emits only VEX-encoded instructions, so there is no SSE2-only SIMD path.
 
 Keys can be any uint32 value in the range `[0, 0xFFFFFFFE]` (the value `0xFFFFFFFF` is reserved as a sentinel).
 
@@ -130,6 +131,9 @@ Benchmark results on Intel Core Ultra 5 125H (`GOEXPERIMENT=simd`):
 | Search    | 10,000    | 11.8 ns | 9.2 ns  | 10.3 ns |
 | Search    | 100,000   | 36.1 ns | 16.2 ns | 12.4 ns |
 | Search    | 1,000,000 | 36.4 ns | 17.5 ns | 13.4 ns |
+
+The "SSE2" column is the 128-bit kernel. Its name is historical: it uses AVX
+(VEX-encoded) instructions and also runs on CPUs with AVX but without AVX2.
 
 ## Limitations
 

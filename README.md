@@ -4,7 +4,7 @@
 
 A static B-tree implementation in Go based on the algorithm described
 at [Algorithmica - S-Tree](https://en.algorithmica.org/hpc/data-structures/s-tree/)
-with SIMD acceleration (128-bit AVX, AVX2, and AVX-512 via `gotip` experimental `archsimd`;
+with SIMD acceleration (128-bit AVX, AVX2, and AVX-512 via the experimental `simd/archsimd` of Go 1.27;
 CPUs without AVX use the pure Go search).
 
 **This is early work and may change without warning!**
@@ -104,21 +104,21 @@ the same reader and use them independently.
 
 ## Building with SIMD
 
-SIMD acceleration currently requires `gotip` and (for the moment) `GOEXPERIMENT=simd`
-due to recent `archsimd` changes:
+SIMD acceleration requires Go 1.27 or newer and (for the moment) `GOEXPERIMENT=simd`.
+The experiment may change in Go 1.28.
 
 ```shell
 # Build with SIMD support
-GOEXPERIMENT=simd gotip build ./...
+GOEXPERIMENT=simd go build ./...
 
 # Test with SIMD
-GOEXPERIMENT=simd gotip test -v ./...
+GOEXPERIMENT=simd go test -v ./...
 
 # Test without SIMD (pure Go fallback)
-gotip test -v ./...
+go test -v ./...
 
 # Benchmarks with SIMD
-GOEXPERIMENT=simd gotip test -bench=BenchmarkSearchImplementations -benchmem ./...
+GOEXPERIMENT=simd go test -bench=BenchmarkSearchImplementations -benchmem ./...
 ```
 
 ## Performance

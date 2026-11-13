@@ -93,7 +93,7 @@ func searchSSE2(blocks []byte, key uint32, numBlocks int) int {
 		if eq != 0 {
 			return k*blockSize + bits.TrailingZeros8(eq)
 		}
-		gt = c.AsInt32x4().Xor(biasVec).Greater(biasedKeyVec).ToBits()
+		gt = c.BitsToInt32().Xor(biasVec).Greater(biasedKeyVec).ToBits()
 		if gt != 0 {
 			childIdx = bits.TrailingZeros8(gt)
 			goto descend
@@ -104,7 +104,7 @@ func searchSSE2(blocks []byte, key uint32, numBlocks int) int {
 		if eq != 0 {
 			return k*blockSize + 4 + bits.TrailingZeros8(eq)
 		}
-		gt = c.AsInt32x4().Xor(biasVec).Greater(biasedKeyVec).ToBits()
+		gt = c.BitsToInt32().Xor(biasVec).Greater(biasedKeyVec).ToBits()
 		if gt != 0 {
 			childIdx = 4 + bits.TrailingZeros8(gt)
 			goto descend
@@ -115,7 +115,7 @@ func searchSSE2(blocks []byte, key uint32, numBlocks int) int {
 		if eq != 0 {
 			return k*blockSize + 8 + bits.TrailingZeros8(eq)
 		}
-		gt = c.AsInt32x4().Xor(biasVec).Greater(biasedKeyVec).ToBits()
+		gt = c.BitsToInt32().Xor(biasVec).Greater(biasedKeyVec).ToBits()
 		if gt != 0 {
 			childIdx = 8 + bits.TrailingZeros8(gt)
 			goto descend
@@ -126,7 +126,7 @@ func searchSSE2(blocks []byte, key uint32, numBlocks int) int {
 		if eq != 0 {
 			return k*blockSize + 12 + bits.TrailingZeros8(eq)
 		}
-		gt = c.AsInt32x4().Xor(biasVec).Greater(biasedKeyVec).ToBits()
+		gt = c.BitsToInt32().Xor(biasVec).Greater(biasedKeyVec).ToBits()
 		if gt != 0 {
 			childIdx = 12 + bits.TrailingZeros8(gt)
 			goto descend
@@ -168,12 +168,12 @@ func searchAVX2(blocks []byte, key uint32, numBlocks int) int {
 			return k*blockSize + 8 + bits.TrailingZeros8(eqHi)
 		}
 
-		gtLo := lo.AsInt32x8().Xor(biasVec).Greater(biasedKeyVec).ToBits()
+		gtLo := lo.BitsToInt32().Xor(biasVec).Greater(biasedKeyVec).ToBits()
 		childIdx := blockSize
 		if gtLo != 0 {
 			childIdx = bits.TrailingZeros8(gtLo)
 		} else {
-			gtHi := hi.AsInt32x8().Xor(biasVec).Greater(biasedKeyVec).ToBits()
+			gtHi := hi.BitsToInt32().Xor(biasVec).Greater(biasedKeyVec).ToBits()
 			if gtHi != 0 {
 				childIdx = 8 + bits.TrailingZeros8(gtHi)
 			}
